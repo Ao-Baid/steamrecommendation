@@ -9,4 +9,21 @@
         <p>Click the button below to get started</p>
     </div>
 
+    <div class="container">
+        <div class="row">
+            {% for game in games %}
+                <div class="col-md-4">
+                    <div class="card mb-4 shadow-sm">
+                        <div class="card-body">
+                            <h5 class="card-title">{{ game.name }}</h5>
+                            <p class="card-text">Developer: {{ game.developer }}</p>
+                            <p class="card-text">Publisher: {{ game.publisher }}</p>
+                            <p class="card-text">Price: ${{ game.price }}</p>
+                            <a href="https://store.steampowered.com/app/{{ game.appid }}" class="btn btn-primary">View on Steam</a>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
 {% endblock %}
