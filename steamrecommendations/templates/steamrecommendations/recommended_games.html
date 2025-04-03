@@ -1,0 +1,33 @@
+{% extends "steamrecommendations/base_generic.html" %}
+
+{% block title %}Recommended Games{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">Top Recommended Games</h1>
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+        {% for game in games %}
+            <div class="col">
+                <div class="card h-100 shadow">
+                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.app_id }}/header.jpg" 
+                         class="card-img-top" 
+                         alt="{{ game.title }} thumbnail"
+                         onerror="this.onerror=null; this.src='https://via.placeholder.com/460x215?text=No+Image+Available';">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ game.title }}</h5>
+                        <p class="card-text">
+                            <strong>Release Date:</strong> {{ game.date_release }}<br>
+                            <strong>Rating:</strong> {{ game.rating }}<br>
+                            <strong>Price:</strong> ${{ game.price_final|floatformat:2 }}<br>
+                            <strong>Recommendations:</strong> {{ game.recommendation_count }}
+                        </p>
+                        <a href="https://store.steampowered.com/app/{{ game.app_id }}" 
+                           class="btn btn-primary" 
+                           target="_blank">View on Steam</a>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

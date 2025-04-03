@@ -1,0 +1,38 @@
+{% extends "steamrecommendations/base_generic.html" %}
+
+{% block title %}Top 100 Popular Steam Games{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">Top 100 Popular Steam Games</h1>
+    
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+        {% for game in games %}
+            <div class="col">
+                <div class="card h-100 shadow">
+                    <!-- Add the game thumbnail here -->
+                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.appid }}/header.jpg" 
+                         class="card-img-top" 
+                         alt="{{ game.name }} thumbnail"
+                         onerror="this.onerror=null; this.src='https://via.placeholder.com/460x215?text=No+Image+Available';">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ game.name }}</h5>
+                        <p class="card-text">
+                            <strong>Developer:</strong> {{ game.developer }}<br>
+                            <strong>Publisher:</strong> {{ game.publisher }}<br>
+                            <strong>Price:</strong> ${{ game.price|floatformat:1 }}<br>
+                            <strong>Current Players:</strong> {{ game.ccu }}
+                        </p>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="badge bg-primary">Score: {{ game.score_rank }}</span>
+                            <a href="https://store.steampowered.com/app/{{ game.appid }}" 
+                               class="btn btn-sm btn-outline-primary" 
+                               target="_blank">View on Steam</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
