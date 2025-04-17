@@ -23,4 +23,5 @@ urlpatterns = [
     path('', views.index, name="index"),
     path('games/', views.games_list, name="game_list"),
     path('recommended_games/', views.recommended_games, name="recommended_games"),
+    path('user_survey/', views.user_survey, name="user_survey"),
 ]

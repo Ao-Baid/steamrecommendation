@@ -1,4 +1,6 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
+from .forms import UserSurveyForm
+from .models import SurveyUserProfile
 from django.http import HttpResponse
 from django.core.cache import cache
 import pandas as pd
@@ -46,9 +48,6 @@ def games_list(request):
     
     return render(request, "steamrecommendations/games_list.html", {"games": sorted_games})
 
-from django.core.cache import cache
-import pandas as pd
-import random
 
 def recommended_games(request):
     # Check if recommendations are already cached
@@ -88,3 +87,19 @@ def recommended_games(request):
 
     # Render the template with the top games
     return render(request, "steamrecommendations/recommended_games.html", {"games": top_games})
+
+
+def user_survey(request):
+    if request.method == 'POST':
+        form = UserSurveyForm(request.POST)
+        if form.is_valid():
+            # Process the form data without associating it with a user
+            favorite_genres = form.cleaned_data['favorite_genres']
+            preferred_price_range = form.cleaned_data['preferred_price_range']
+            play_time_preference = form.cleaned_data['play_time_preference']
+            # You can handle the data here, e.g., save it to a temporary storage or use it directly
+            return redirect('personalized_recommendations')
+    else:
+        form = UserSurveyForm()
+    
+    return render(request, 'steamrecommendations/user_survey.html', {'form': form})

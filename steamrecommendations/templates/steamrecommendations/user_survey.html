@@ -1,0 +1,100 @@
+{% extends "steamrecommendations/base_generic.html" %}
+
+{% block title %}User Survey{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h2 class="mb-0">Personalize Your Game Recommendations</h2>
+                </div>
+                <div class="card-body">
+                    <p class="lead">
+                        Tell us about your gaming preferences so we can recommend games tailored to your taste.
+                    </p>
+                    
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        <div class="mb-4">
+                            <h4>What genres do you enjoy?</h4>
+                            <div class="genre-options">
+                                {{ form.favorite_genres }}
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <h4>What's your preferred price range?</h4>
+                            <div class="price-options">
+                                {% for radio in form.preferred_price_range %}
+                                <div class="form-check">
+                                    {{ radio.tag }}
+                                    <label class="form-check-label" for="{{ radio.id_for_label }}">
+                                        {{ radio.choice_label }}
+                                    </label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <h4>How much time do you typically spend on games?</h4>
+                            <div class="time-options">
+                                {% for radio in form.play_time_preference %}
+                                <div class="form-check">
+                                    {{ radio.tag }}
+                                    <label class="form-check-label" for="{{ radio.id_for_label }}">
+                                        {{ radio.choice_label }}
+                                    </label>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg">Get Personalized Recommendations</button>
+                        </div>
+                    </form>
+                </div>
+                <div class="card-footer text-muted">
+                    Your preferences will be saved for future recommendations. You can update them anytime.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .genre-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 10px;
+    }
+    
+    .genre-options label {
+        display: inline-flex;
+        align-items: center;
+        padding: 8px 12px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .genre-options label:hover {
+        background-color: #f8f9fa;
+    }
+    
+    .genre-options input[type="checkbox"]:checked + label {
+        background-color: #cfe2ff;
+        border-color: #0d6efd;
+    }
+    
+    .genre-options input[type="checkbox"] {
+        margin-right: 6px;
+    }
+</style>
+{% endblock %}
