@@ -4,8 +4,11 @@
 
 {% block content %}
 <div class="container mt-4">
-    <h1 class="mb-4 text-center section-title">Top 100 Popular Steam Games</h1>
-
+    <div class="row mb-4">
+        <div class="col text-center">
+            <h2 class="section-title">Top 100 Popular Steam Games</h2>
+        </div>
+    </div>
     <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
         {% for game in games %}
             <div class="col">
