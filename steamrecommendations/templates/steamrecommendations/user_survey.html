@@ -1,4 +1,5 @@
 {% extends "steamrecommendations/base_generic.html" %}
+{% load crispy_forms_tags %}
 
 {% block title %}User Survey{% endblock %}
 
@@ -15,48 +16,7 @@
                         Tell us about your gaming preferences so we can recommend games tailored to your taste.
                     </p>
                     
-                    <form method="post">
-                        {% csrf_token %}
-                        
-                        <div class="mb-4">
-                            <h4>What genres do you enjoy?</h4>
-                            <div class="genre-options">
-                                {{ form.favorite_genres }}
-                            </div>
-                        </div>
-                        
-                        <div class="mb-4">
-                            <h4>What's your preferred price range?</h4>
-                            <div class="price-options">
-                                {% for radio in form.preferred_price_range %}
-                                <div class="form-check">
-                                    {{ radio.tag }}
-                                    <label class="form-check-label" for="{{ radio.id_for_label }}">
-                                        {{ radio.choice_label }}
-                                    </label>
-                                </div>
-                                {% endfor %}
-                            </div>
-                        </div>
-                        
-                        <div class="mb-4">
-                            <h4>How much time do you typically spend on games?</h4>
-                            <div class="time-options">
-                                {% for radio in form.play_time_preference %}
-                                <div class="form-check">
-                                    {{ radio.tag }}
-                                    <label class="form-check-label" for="{{ radio.id_for_label }}">
-                                        {{ radio.choice_label }}
-                                    </label>
-                                </div>
-                                {% endfor %}
-                            </div>
-                        </div>
-                        
-                        <div class="d-grid gap-2">
-                            <button type="submit" class="btn btn-primary btn-lg">Get Personalized Recommendations</button>
-                        </div>
-                    </form>
+                    {% crispy form %}
                 </div>
                 <div class="card-footer text-muted">
                     Your preferences will be saved for future recommendations. You can update them anytime.
@@ -67,34 +27,35 @@
 </div>
 
 <style>
-    .genre-options {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 10px;
+    /* Custom styling for genre checkboxes */
+    .form-check {
+        margin-bottom: 0.5rem;
     }
     
-    .genre-options label {
+    /* You can still keep custom styling if needed */
+    div:has(.favorite_genres) .form-check {
+        display: inline-block;
+        margin-right: 10px;
+        margin-bottom: 10px;
+    }
+    
+    div:has(.favorite_genres) .form-check-label {
         display: inline-flex;
         align-items: center;
-        padding: 8px 12px;
+        padding: 6px 10px;
         border: 1px solid #ccc;
         border-radius: 5px;
         cursor: pointer;
         transition: all 0.2s;
     }
     
-    .genre-options label:hover {
+    div:has(.favorite_genres) .form-check-label:hover {
         background-color: #f8f9fa;
     }
     
-    .genre-options input[type="checkbox"]:checked + label {
+    div:has(.favorite_genres) .form-check-input:checked + .form-check-label {
         background-color: #cfe2ff;
         border-color: #0d6efd;
-    }
-    
-    .genre-options input[type="checkbox"] {
-        margin-right: 6px;
     }
 </style>
 {% endblock %}

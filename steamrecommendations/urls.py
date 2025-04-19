@@ -24,4 +24,6 @@ urlpatterns = [
     path('games/', views.games_list, name="game_list"),
     path('recommended_games/', views.recommended_games, name="recommended_games"),
     path('user_survey/', views.user_survey, name="user_survey"),
+    path('search/', views.search_games, name="search_games"),
+    path('recommend/<int:app_id>/', views.recommendations_for_game, name="recommendations_for_game"),
 ]

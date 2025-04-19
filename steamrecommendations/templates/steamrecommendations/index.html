@@ -1,29 +1,144 @@
 {% extends "steamrecommendations/base_generic.html" %}
 
-{% block title %}Steam Recommendation{% endblock %}
+{% block title %}Steam Game Recommendations{% endblock %}
+
+{% block extra_head %}
+
+{% endblock %}
 
 {% block content %}
-    <div class="d-flex flex-column align-items-center">
-        <h1>Steam Recommendation</h1>
-        <p class="lead">Welcome to the Steam Recommendation website. This website will help you find games that you might like based on your preferences, mood and more.</p>
-        <p>Click the button below to get started</p>
-    </div>
+<div class="hero-section">
+  <div class="container">
+    <h1>Steam Game Recommendations</h1>
+    <p class="lead">Discover games tailored to your preferences and explore what's popular right now</p>
+    <a href="{% url 'user_survey' %}" class="btn btn-success">Take the Recommendation Survey</a>
+  </div>
+</div>
 
-    <div class="container">
-        <div class="row">
-            {% for game in games %}
-                <div class="col-md-4">
-                    <div class="card mb-4 shadow-sm">
-                        <div class="card-body">
-                            <h5 class="card-title">{{ game.name }}</h5>
-                            <p class="card-text">Developer: {{ game.developer }}</p>
-                            <p class="card-text">Publisher: {{ game.publisher }}</p>
-                            <p class="card-text">Price: ${{ game.price }}</p>
-                            <a href="https://store.steampowered.com/app/{{ game.appid }}" class="btn btn-primary">View on Steam</a>
-                        </div>
-                    </div>
-                </div>
-            {% endfor %}
-        </div>
+<div class="container">
+  <div class="row mb-4">
+    <div class="col text-center">
+      <h2 class="section-title">Popular Games on Steam</h2>
+      <p class="text-muted">Watch as our selection of popular games cycles through trending titles</p>
     </div>
+  </div>
+  
+  <div class="game-cards-container">
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4" id="gameCardsGrid">
+      <!-- Cards will be inserted here by JavaScript -->
+    </div>
+  </div>
+</div>
+
+{{ games|json_script:"games-data" }}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // All games data parsed from JSON in the separate script element
+  const allGames = JSON.parse(document.getElementById('games-data').textContent);
+  
+  
+  const gameCardsGrid = document.getElementById('gameCardsGrid');
+  const numCards = 6; // Number of cards to show
+  let displayedGames = [];
+  
+  // Initialize the grid with cards
+  function initializeGrid() {
+    gameCardsGrid.innerHTML = '';
+    displayedGames = selectRandomGames(numCards);
+    
+    // Create each card
+    for (let i = 0; i < numCards; i++) {
+      const cardCol = document.createElement('div');
+      cardCol.className = 'col';
+      cardCol.innerHTML = createCardHTML(displayedGames[i], i);
+      gameCardsGrid.appendChild(cardCol);
+    }
+  }
+  
+  // Select random games from the pool
+  function selectRandomGames(count) {
+    const shuffled = [...allGames].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, count);
+  }
+  
+  // Create HTML for a game card
+  function createCardHTML(game, index) {
+    return `
+      <div class="game-card" id="card-${index}">
+        <div class="ccu-badge">
+          <span class="player-count"></span>${formatNumber(game.ccu)} playing
+        </div>
+        <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/${game.appid}/header.jpg" 
+             class="game-card-img"
+             alt="${game.name}" 
+             onerror="this.onerror=null; this.src='https://via.placeholder.com/460x215?text=No+Image';">
+        <div class="game-card-body">
+          <h5 class="game-card-title">${game.name}</h5>
+          <p class="game-card-text">Dev: ${game.developer}</p>
+          <p class="game-card-text">Pub: ${game.publisher}</p>
+          <p class="price ${game.isFree ? 'free' : ''}">${game.price}</p>
+        </div>
+        <div class="card-footer">
+          <a href="https://store.steampowered.com/app/${game.appid}" class="btn btn-steam" target="_blank">View on Steam</a>
+        </div>
+      </div>
+    `;
+  }
+  
+  // Format large numbers with commas
+  function formatNumber(num) {
+    if (!num) return '0';
+    return parseInt(num).toLocaleString();
+  }
+  
+  // Shuffle a specific card
+  function shuffleCard(cardIndex) {
+    const cardElement = document.getElementById(`card-${cardIndex}`);
+    if (!cardElement) return;
+    
+    // Add transition class
+    cardElement.classList.add('shuffling');
+    
+    // Get a random game that's not currently displayed
+    const availableGames = allGames.filter(game => 
+      !displayedGames.some(displayedGame => displayedGame.appid === game.appid)
+    );
+    
+    if (availableGames.length === 0) return; // No new games to display
+    
+    const randomGame = availableGames[Math.floor(Math.random() * availableGames.length)];
+    
+    // Update the displayed games array
+    displayedGames[cardIndex] = randomGame;
+    
+    // After animation completes, update card content
+    setTimeout(() => {
+      const cardCol = cardElement.parentElement;
+      cardCol.innerHTML = createCardHTML(randomGame, cardIndex);
+      
+      // Trigger reflow
+      void document.getElementById(`card-${cardIndex}`).offsetWidth;
+      
+      // Remove transition class after a delay
+      setTimeout(() => {
+        document.getElementById(`card-${cardIndex}`).classList.remove('shuffling');
+      }, 50);
+    }, 300);
+  }
+  
+  // Start the automatic shuffling
+  function startShuffling() {
+    // Shuffle one random card every 3-5 seconds
+    setInterval(() => {
+      const randomCardIndex = Math.floor(Math.random() * numCards);
+      shuffleCard(randomCardIndex);
+    }, Math.random() * 2000 + 3000); // Random time between 3-5 seconds
+  }
+  
+  // Initialize and start shuffling
+  initializeGrid();
+  startShuffling();
+});
+</script>
 {% endblock %}

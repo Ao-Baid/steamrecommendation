@@ -1,0 +1,41 @@
+<!-- filepath: c:\Users\aobai\Documents\Programming Stuff\Steam Game Recommendation Website\steamrecommendation\steamrecommendations\templates\steamrecommendations\search_results.html -->
+{% extends "steamrecommendations/base_generic.html" %}
+
+{% block title %}Search Results for "{{ query }}"{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Search Results for "{{ query }}"</h1>
+
+    {% if results %}
+        <p>{{ results|length }} game(s) found.</p>
+        <div class="list-group">
+            {% for game in results %}
+                <div class="list-group-item list-group-item-action d-flex gap-3 py-3" aria-current="true">
+                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.app_id }}/header.jpg"
+                         alt="{{ game.title }} thumbnail"
+                         width="120" height="56" class="rounded flex-shrink-0"
+                         onerror="this.onerror=null; this.src='https://via.placeholder.com/120x56?text=No+Image'; this.style.objectFit='cover';">
+                    <div class="d-flex gap-2 w-100 justify-content-between">
+                        <div>
+                            <h6 class="mb-0">{{ game.title }}</h6>
+                            <p class="mb-0 opacity-75">
+                                <small>
+                                    ID: {{ game.app_id }}
+                                    {% if game.date_release %}| Released: {{ game.date_release }}{% endif %}
+                                    {% if game.rating %}| Rating: {{ game.rating }}{% endif %}
+                                    {% if game.price_final is not None %}| Price: ${{ game.price_final|floatformat:2 }}{% endif %}
+                                </small>
+                            </p>
+                        </div>
+                        <a href="{% url 'recommendations_for_game' game.app_id %}" class="btn btn-sm btn-info align-self-start">Get Recommendations</a>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>No games found matching your query.</p>
+    {% endif %}
+     <a href="{% url 'index' %}" class="btn btn-secondary mt-3">Back Home</a>
+</div>
+{% endblock %}

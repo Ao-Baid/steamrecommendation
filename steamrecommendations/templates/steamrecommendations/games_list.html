@@ -1,5 +1,6 @@
 {% extends "steamrecommendations/base_generic.html" %}
 
+
 {% block title %}Top 100 Popular Steam Games{% endblock %}
 
 {% block content %}
@@ -20,7 +21,12 @@
                         <p class="card-text">
                             <strong>Developer:</strong> {{ game.developer }}<br>
                             <strong>Publisher:</strong> {{ game.publisher }}<br>
-                            <strong>Price:</strong> ${{ game.price|floatformat:1 }}<br>
+                            <strong>Price:</strong> 
+                            {% if game.is_free %}
+                                <span style="color: green; font-weight: bold;">Free to Play</span>
+                            {% else %}
+                                {{ game.price }} USD
+                            {% endif %}<br>
                             <strong>Current Players:</strong> {{ game.ccu }}
                         </p>
                         <div class="d-flex justify-content-between align-items-center">

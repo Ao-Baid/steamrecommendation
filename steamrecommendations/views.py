@@ -1,31 +1,44 @@
 from django.shortcuts import render, redirect
 from .forms import UserSurveyForm
 from .models import SurveyUserProfile
-from django.http import HttpResponse
+from django.http import HttpResponse, Http404
 from django.core.cache import cache
+from django.urls import reverse
+from django.contrib import messages
+from .recommendation import get_content_recommendations, load_model_and_data
 import pandas as pd
 import random
 import requests
 
 # Create your views here.
 def index(request):
-    #firstly, check if data is already cached
+    # Check if data is already cached
     cached_games = cache.get("top100in2weeks")
     if cached_games is not None:
         games = cached_games
     else:
-        #fetch data from Steam Spy API
+        # Fetch data from Steam Spy API
         response = requests.get("https://steamspy.com/api.php?request=top100in2weeks")
         games = response.json()
         if not isinstance(games, dict) or not games:
             return HttpResponse("Invalid or empty data received from Steam Spy API.", status=500)
-        #cache data for 1 hour
-        cache.set('top100in2weeks', games, timeout=60)
-
-    #select random subset of games to display
-    random_games = random.sample(list(games.values()), 5)
-
-    return render(request, "steamrecommendations/index.html", {"games": random_games})
+        # Cache data for 1 hour
+        cache.set('top100in2weeks', games, timeout=60*60)
+    
+    # Format game prices and other data
+    games_list = list(games.values())
+    for game in games_list:
+        if float(game.get('price', 0)) == 0.0:
+            game['display_price'] = "Free to Play"
+            game['is_free'] = True
+        else:
+            game['display_price'] = f"${float(game['price']) / 100:.2f}"
+            game['is_free'] = False
+    
+    # Select a larger pool of games for shuffling (30 games)
+    display_games = random.sample(games_list, min(30, len(games_list)))
+    
+    return render(request, "steamrecommendations/index.html", {"games": display_games})
 
 def games_list(request):
     # Check if data is already cached
@@ -46,6 +59,15 @@ def games_list(request):
         reverse=True
     )
     
+    # Adjust game prices
+    for game in sorted_games:
+        if float(game['price']) == 0.0:
+            game['price'] = "Free to Play"
+            game['is_free'] = True
+        else:
+            game['price'] = f"{float(game['price']) / 100:.2f}"
+            game['is_free'] = False
+
     return render(request, "steamrecommendations/games_list.html", {"games": sorted_games})
 
 
@@ -87,6 +109,49 @@ def recommended_games(request):
 
     # Render the template with the top games
     return render(request, "steamrecommendations/recommended_games.html", {"games": top_games})
+
+def search_games(request):
+    query = request.GET.get('q', '')
+    results = []
+    if query:
+        # load the games dataframe used by the recommender
+        _, _, df_games, _ = load_model_and_data()
+        if df_games is not None:
+            # Case-insensitive search
+            search_results_df = df_games[df_games['title'].str.contains(query, case=False, na=False)]
+            # Select relevant columns and limit results
+            results = search_results_df[['app_id', 'title', 'date_release', 'rating', 'price_final']].head(50).to_dict(orient='records')
+        else:
+            messages.error(request, "Error loading game data. Please try again later.")
+
+    return render(request, "steamrecommendations/search_results.html", {"query": query, "results": results})
+
+
+def recommendations_for_game(request, app_id):
+    try:
+        # Ensure app_id is an integer
+        app_id_int = int(app_id)
+    except ValueError:
+        raise Http404("Invalid game ID format.")
+
+    recommendations_df, source_game_title = get_content_recommendations(app_id_int)
+
+    if source_game_title is None:
+         raise Http404(f"Game with ID {app_id_int} not found in recommendation dataset.")
+
+    context = {
+        'source_game_title': source_game_title,
+        'source_app_id': app_id_int,
+        'recommendations': recommendations_df.to_dict(orient='records') if not recommendations_df.empty else [],
+    }
+    return render(request, 'steamrecommendations/recommendations_for_game.html', context)
+
+
+
+
+
+
+
 
 
 def user_survey(request):

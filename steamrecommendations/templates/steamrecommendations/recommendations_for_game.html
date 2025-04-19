@@ -1,0 +1,42 @@
+<!-- filepath: c:\Users\aobai\Documents\Programming Stuff\Steam Game Recommendation Website\steamrecommendation\steamrecommendations\templates\steamrecommendations\recommendations_for_game.html -->
+{% extends "steamrecommendations/base_generic.html" %}
+
+{% block title %}Recommendations for {{ source_game_title }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">Recommendations based on "{{ source_game_title }}" (ID: {{ source_app_id }})</h1>
+
+    {% if recommendations %}
+        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+            {% for game in recommendations %}
+                <div class="col">
+                    <div class="card h-100 shadow">
+                        <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.app_id }}/header.jpg"
+                             class="card-img-top"
+                             alt="{{ game.title }} thumbnail"
+                             onerror="this.onerror=null; this.src='https://via.placeholder.com/460x215?text=No+Image+Available';">
+                        <div class="card-body">
+                            <h5 class="card-title">{{ game.title }}</h5>
+                            <p class="card-text">
+                                {% if game.date_release %}<strong>Release Date:</strong> {{ game.date_release }}<br>{% endif %}
+                                {% if game.rating %}<strong>Rating:</strong> {{ game.rating }}<br>{% endif %}
+                                {% if game.price_final is not None %}<strong>Price:</strong> ${{ game.price_final|floatformat:2 }}<br>{% endif %}
+                                {% if game.similarity %}<!-- <small class="text-muted">Similarity: {{ game.similarity|floatformat:3 }}</small><br> -->{% endif %}
+                            </p>
+                            <a href="https://store.steampowered.com/app/{{ game.app_id }}"
+                               class="btn btn-primary"
+                               target="_blank">View on Steam</a>
+                            <!-- Optional: Link to get recommendations based on *this* game -->
+                            <a href="{% url 'recommendations_for_game' game.app_id %}" class="btn btn-secondary btn-sm mt-2">Recommend based on this</a>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>Could not generate recommendations for this game. It might not be in our dataset or an error occurred.</p>
+    {% endif %}
+     <a href="{% url 'index' %}" class="btn btn-secondary mt-3">Back Home</a>
+</div>
+{% endblock %}
