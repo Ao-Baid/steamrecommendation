@@ -1,40 +1,40 @@
 {% extends "steamrecommendations/base_generic.html" %}
 
-
 {% block title %}Top 100 Popular Steam Games{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
-    <h1 class="mb-4">Top 100 Popular Steam Games</h1>
-    
+    <h1 class="mb-4 text-center section-title">Top 100 Popular Steam Games</h1>
+
     <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
         {% for game in games %}
             <div class="col">
-                <div class="card h-100 shadow">
-                    <!-- Add the game thumbnail here -->
-                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.appid }}/header.jpg" 
-                         class="card-img-top" 
+                <div class="card h-100">
+                    {% if game.ccu %}
+                    <div class="ccu-badge">
+                        <span class="player-count"></span>{{ game.ccu|floatformat:"0" }} playing
+                    </div>
+                    {% endif %}
+                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.appid }}/header.jpg"
+                         class="card-img-top"
                          alt="{{ game.name }} thumbnail"
-                         onerror="this.onerror=null; this.src='https://via.placeholder.com/460x215?text=No+Image+Available';">
+                         onerror="this.onerror=null; this.src='https://via.placeholder.com/460x160?text=No+Image';">
                     <div class="card-body">
-                        <h5 class="card-title">{{ game.name }}</h5>
+                        <h5 class="card-title" title="{{ game.name }}">{{ game.name }}</h5>
                         <p class="card-text">
                             <strong>Developer:</strong> {{ game.developer }}<br>
                             <strong>Publisher:</strong> {{ game.publisher }}<br>
-                            <strong>Price:</strong> 
-                            {% if game.is_free %}
-                                <span style="color: green; font-weight: bold;">Free to Play</span>
-                            {% else %}
-                                {{ game.price }} USD
-                            {% endif %}<br>
-                            <strong>Current Players:</strong> {{ game.ccu }}
+                            <strong class="price {% if game.is_free %}free{% endif %}">
+                                {{ game.display_price }}
+                            </strong>
                         </p>
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span class="badge bg-primary">Score: {{ game.score_rank }}</span>
-                            <a href="https://store.steampowered.com/app/{{ game.appid }}" 
-                               class="btn btn-sm btn-outline-primary" 
-                               target="_blank">View on Steam</a>
-                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <a href="https://store.steampowered.com/app/{{ game.appid }}"
+                           class="btn btn-sm btn-primary"
+                           target="_blank">View on Steam</a>
+                        <a href="{% url 'recommendations_for_game' game.appid %}"
+                           class="btn btn-sm btn-secondary">Get Recs</a>
                     </div>
                 </div>
             </div>
