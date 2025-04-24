@@ -16,6 +16,13 @@ TFIDF_MODEL_PATH = os.path.join(MODEL_DIR, 'tfidf_model_full.joblib') # Changed 
 TFIDF_MATRIX_PATH = os.path.join(MODEL_DIR, 'tfidf_matrix_full.joblib') # Changed filename
 GAMES_DF_PATH = os.path.join(MODEL_DIR, 'games_df_full.joblib') # Changed filename
 META_DF_PATH = os.path.join(MODEL_DIR, 'meta_df_full.joblib') # Changed filename and variable
+ITEM_SIMILARITY_PATH = os.path.join(MODEL_DIR, 'item_similarity.joblib') # Path for item similarity matrix
+APP_ID_MAP_PATH = os.path.join(MODEL_DIR, 'item_similarity_app_id_map.joblib') # Path for app ID mapping
+
+# Cache for loaded similarity matrix
+_item_similarity_cache = None
+_df_games_cache = None  # Assuming you have a global df_games cache elsewhere
+
 
 def load_data():
     """Loads the necessary dataframes."""
@@ -361,7 +368,7 @@ def get_enhanced_game_data(app_id_int):
     return None
 
 
-def get_content_recommendations(app_id, n=10, min_similarity=0.08):
+def get_content_recommendations(app_id, n=12, min_similarity=0.08):
     """Gets content-based recommendations for a given app_id using the FULL dataset."""
     tfidf, tfidf_matrix, df_games, df_meta = load_model_and_data()
 
@@ -546,3 +553,132 @@ def get_content_recommendations(app_id, n=10, min_similarity=0.08):
     print(f"Returning {len(recommended_games)} recommendations for {app_id} ('{source_game_title}')")
     return recommended_games, source_game_title
 
+
+
+def get_collaborative_recommendations(app_id=None, favorite_games=None, n=12, df_games=None):
+    """
+    Generate recommendations using the precomputed item similarity matrix.
+    
+    Can work in two modes:
+    1. Single game mode: Recommend games similar to a specific app_id
+    2. Profile mode: Recommend games based on a list of favorite_games
+    
+    Args:
+        app_id (int, optional): A single game ID to get similar games for
+        favorite_games (list, optional): A list of favorite game IDs
+        n (int): Number of recommendations to return
+        df_games (DataFrame, optional): DataFrame with game details, if already loaded
+    
+    Returns:
+        DataFrame: Recommendations with app_id, title, similarity score, etc.
+    """
+    global _item_similarity_cache, _df_games_cache
+    
+    # Validate inputs
+    if app_id is None and (not favorite_games or len(favorite_games) == 0):
+        print("Error: Either app_id or favorite_games must be provided")
+        return pd.DataFrame()
+    
+    # Load item similarity matrix if not already in cache
+    if _item_similarity_cache is None:
+        try:
+            print(f"Loading item similarity matrix from {ITEM_SIMILARITY_PATH}")
+            _item_similarity_cache = joblib.load(ITEM_SIMILARITY_PATH)
+            print(f"Loaded similarity matrix with shape {_item_similarity_cache.shape}")
+        except FileNotFoundError:
+            print(f"Error: Item similarity matrix not found at {ITEM_SIMILARITY_PATH}")
+            return pd.DataFrame()
+        except Exception as e:
+            print(f"Error loading item similarity matrix: {e}")
+            return pd.DataFrame()
+    
+    # Use the provided df_games or load from cache/function
+    if df_games is None:
+        if _df_games_cache is not None:
+            df_games = _df_games_cache
+        else:
+            # Load from your existing function
+            _, _, df_games, _ = load_model_and_data()
+            _df_games_cache = df_games
+    
+    if df_games is None or df_games.empty:
+        print("No game data available")
+        return pd.DataFrame()
+    
+    sim_matrix = _item_similarity_cache
+    
+    # Track which recommendations came from which source game
+    all_recommendations = {}  # app_id -> (max_similarity, source_app_id)
+    
+    if app_id is not None:
+        # Mode 1: Recommendations based on a single game
+        app_id_int = int(app_id)
+        if app_id_int not in sim_matrix.index:
+            print(f"Game {app_id_int} not found in similarity matrix")
+            return pd.DataFrame()
+        
+        # Get similar items for this game
+        similar_items = sim_matrix.loc[app_id_int]
+        # Remove self-similarity
+        similar_items = similar_items[similar_items.index != app_id_int]
+        
+        # Convert to dictionary for consistent processing
+        for item_id, score in similar_items.items():
+            # Don't include negative similarities
+            if score > 0:
+                all_recommendations[item_id] = (score, app_id_int)
+    
+    else:
+        # Mode 2: Recommendations based on multiple favorite games
+        valid_favorites = []
+        for fav_id in favorite_games:
+            try:
+                fav_id_int = int(fav_id)
+                if fav_id_int in sim_matrix.index:
+                    valid_favorites.append(fav_id_int)
+                else:
+                    print(f"Favorite game {fav_id_int} not in similarity matrix")
+            except (ValueError, TypeError):
+                print(f"Invalid favorite game ID: {fav_id}")
+        
+        if not valid_favorites:
+            print("No valid favorite games found in similarity matrix")
+            return pd.DataFrame()
+        
+        # For each favorite game, get similar items
+        for fav_id in valid_favorites:
+            similar_items = sim_matrix.loc[fav_id]
+            # Remove the favorite itself and other favorites from recommendations
+            similar_items = similar_items[(similar_items.index != fav_id) & 
+                                          ~similar_items.index.isin(valid_favorites)]
+            
+            # Add to recommendations dict, keeping highest score if already exists
+            for item_id, score in similar_items.items():
+                if score > 0:  # Only positive similarities
+                    if item_id not in all_recommendations or score > all_recommendations[item_id][0]:
+                        all_recommendations[item_id] = (score, fav_id)
+    
+    if not all_recommendations:
+        print("No recommendations found")
+        return pd.DataFrame()
+    
+    # Convert recommendations to DataFrame
+    rec_data = [(app_id, sim, src) for app_id, (sim, src) in all_recommendations.items()]
+    rec_df = pd.DataFrame(rec_data, columns=['app_id', 'similarity', 'source_game'])
+    
+    # Sort by similarity score
+    rec_df = rec_df.sort_values('similarity', ascending=False)
+    
+    # Get top N recommendations
+    rec_df = rec_df.head(n)
+    
+    # Merge with game details
+    result = pd.merge(rec_df, df_games, on='app_id', how='inner')
+    
+    # If no matches were found after merging
+    if result.empty:
+        print("No recommendations were found in the game details database")
+        return pd.DataFrame()
+    
+    print(f"Generated {len(result)} collaborative filtering recommendations")
+    return result

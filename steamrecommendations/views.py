@@ -5,7 +5,7 @@ from django.http import HttpResponse, Http404
 from django.core.cache import cache
 from django.urls import reverse
 from django.contrib import messages
-from .recommendation import get_content_recommendations, load_model_and_data
+from .recommendation import get_content_recommendations, load_model_and_data, get_collaborative_recommendations
 import pandas as pd
 import random
 import requests
@@ -39,6 +39,9 @@ def index(request):
     display_games = random.sample(games_list, min(30, len(games_list)))
     
     return render(request, "steamrecommendations/index.html", {"games": display_games})
+
+def about(request):
+    return render(request, "steamrecommendations/about.html")
 
 def games_list(request):
     # Check if data is already cached
@@ -147,13 +150,6 @@ def recommendations_for_game(request, app_id):
     return render(request, 'steamrecommendations/recommendations_for_game.html', context)
 
 
-
-
-
-
-
-
-
 def user_survey(request):
     if request.method == 'POST':
         form = UserSurveyForm(request.POST)
@@ -168,3 +164,38 @@ def user_survey(request):
         form = UserSurveyForm()
     
     return render(request, 'steamrecommendations/user_survey.html', {'form': form})
+
+
+
+
+def collaborative_recommendations_for_game(request, app_id):
+    """View for showing collaborative filtering recommendations for a specific game."""
+    try:
+        app_id_int = int(app_id)
+    except ValueError:
+        raise Http404("Invalid game ID format.")
+        
+    # Get recommendations using the item similarity matrix
+    recommendations_df = get_collaborative_recommendations(app_id=app_id_int, n=12)
+    
+    if recommendations_df.empty:
+        messages.warning(request, "No collaborative recommendations found for this game.")
+        # Fallback to content-based if CF fails
+        recommendations_df, source_game_title = get_content_recommendations(app_id_int, n=12)
+        if not recommendations_df.empty:
+            messages.info(request, "Showing content-based recommendations instead.")
+        else:
+            messages.error(request, "No recommendations available for this game.")
+            return redirect('home')  # or wherever appropriate
+    else:
+        # Get the source game title
+        source_game_title = recommendations_df['title'].iloc[0] if 'title' in recommendations_df.columns else f"Game {app_id_int}"
+        
+    context = {
+        'source_game_title': source_game_title,
+        'source_app_id': app_id_int,
+        'recommendations': recommendations_df.to_dict(orient='records') if not recommendations_df.empty else [],
+        'rec_type': 'collaborative'  # To indicate the type of recommendations
+    }
+    
+    return render(request, 'steamrecommendations/collaborative_recommendations_for_game.html', context)

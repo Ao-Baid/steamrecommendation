@@ -256,3 +256,59 @@
     transform: scale(1.02); /* Simpler scale on hover */
     box-shadow: 0 8px 20px rgba(102, 192, 244, 0.4);
   }
+
+  .content-block {
+    background-color: var(--steam-mid-blue); /* Use mid-blue for consistency */
+    padding: 1.5rem 2rem; /* Add padding */
+    border-radius: 8px; /* Rounded corners like cards */
+    margin-bottom: 2rem; /* Space below the block */
+    border: 1px solid rgba(102, 192, 244, 0.1); /* Very subtle border */
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15); /* Subtle shadow */
+  }
+
+  .content-block p {
+    color: var(--steam-text); /* Standard text color */
+    line-height: 1.7; /* Improve readability */
+    margin-bottom: 1rem; /* Space between paragraphs */
+    font-size: 1rem; /* Slightly larger base font for readability */
+  }
+
+  .content-block h2,
+  .content-block h3,
+  .content-block h4 {
+    color: #ffffff; /* White headings */
+    margin-top: 1.8rem;
+    margin-bottom: 1.2rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid rgba(102, 192, 244, 0.25); /* Subtle underline */
+  }
+
+   .content-block h2:first-child,
+   .content-block h3:first-child,
+   .content-block h4:first-child {
+      margin-top: 0; /* Remove top margin if heading is the first element */
+   }
+
+  .content-block a {
+    color: var(--steam-light-blue);
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .content-block a:hover {
+    text-decoration: underline;
+    color: #80d4ff; /* Lighter blue on hover */
+  }
+
+  .content-block ul,
+  .content-block ol {
+    margin-left: 1.5rem;
+    margin-bottom: 1rem;
+    color: var(--steam-text);
+    padding-left: 1rem; /* Ensure padding for list markers */
+  }
+
+  .content-block li {
+    margin-bottom: 0.6rem;
+    line-height: 1.6;
+  }
