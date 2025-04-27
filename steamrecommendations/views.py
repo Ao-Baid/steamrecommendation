@@ -9,6 +9,25 @@ from .recommendation import get_content_recommendations, load_model_and_data, ge
 import pandas as pd
 import random
 import requests
+import numpy as np
+
+# Pre-load df_games if possible to speed up collaborative filtering calls
+# This is a simple approach; consider more robust caching/loading strategies
+DF_GAMES_CACHE = None
+def preload_df_games():
+    global DF_GAMES_CACHE
+    if DF_GAMES_CACHE is None:
+        try:
+            _, _, games_df, _ = load_model_and_data()
+            if games_df is not None:
+                DF_GAMES_CACHE = games_df
+                print("Preloaded df_games into view cache.")
+            else:
+                print("Failed to preload df_games.")
+        except Exception as e:
+            print(f"Error preloading df_games: {e}")
+
+preload_df_games() # Load when the server starts
 
 # Create your views here.
 def index(request):
@@ -74,45 +93,6 @@ def games_list(request):
     return render(request, "steamrecommendations/games_list.html", {"games": sorted_games})
 
 
-def recommended_games(request):
-    # Check if recommendations are already cached
-    cached_recommendations = cache.get("cached_recommendations")
-    if cached_recommendations is not None:
-        # If cached, randomly select 10 games from the cached recommendations
-        top_games = random.sample(cached_recommendations, min(10, len(cached_recommendations)))
-    else:
-        # Load the recommendations.csv file in chunks
-        recommendations_path = "./data/recommendations.csv"
-        recommendations_df = pd.read_csv(recommendations_path, usecols=['app_id', 'is_recommended'], dtype={'app_id': 'int32', 'is_recommended': 'bool'})
-
-        # Filter out rows where 'is_recommended' is not True
-        recommendations_df = recommendations_df[recommendations_df['is_recommended'] == True]
-
-        # Count how many times each game is recommended
-        recommended_counts = recommendations_df.groupby('app_id').size().reset_index(name='recommendation_count')
-
-        # Load the games.csv file to get game details
-        games_path = "./data/games.csv"
-        games_df = pd.read_csv(games_path, usecols=['app_id', 'title', 'date_release', 'rating', 'price_final'], dtype={'app_id': 'int32', 'title': 'string', 'rating': 'string', 'price_final': 'float32'})
-
-        # Merge the recommendation counts with the games data
-        merged_df = pd.merge(games_df, recommended_counts, how='inner', left_on='app_id', right_on='app_id')
-
-        # Sort games by recommendation count in descending order
-        sorted_games = merged_df.sort_values(by='recommendation_count', ascending=False)
-
-        # Convert the top games to a dictionary
-        cached_recommendations = sorted_games.to_dict(orient='records')
-
-        # Cache the recommendations for 1 hour
-        cache.set("cached_recommendations", cached_recommendations, timeout=60 * 60)
-
-        # Randomly select 10 games from the cached recommendations
-        top_games = random.sample(cached_recommendations, min(10, len(cached_recommendations)))
-
-    # Render the template with the top games
-    return render(request, "steamrecommendations/recommended_games.html", {"games": top_games})
-
 def search_games(request):
     query = request.GET.get('q', '')
     results = []
@@ -166,8 +146,6 @@ def user_survey(request):
     return render(request, 'steamrecommendations/user_survey.html', {'form': form})
 
 
-
-
 def collaborative_recommendations_for_game(request, app_id):
     """View for showing collaborative filtering recommendations for a specific game."""
     try:
@@ -199,3 +177,100 @@ def collaborative_recommendations_for_game(request, app_id):
     }
     
     return render(request, 'steamrecommendations/collaborative_recommendations_for_game.html', context)
+
+
+def recommendations_view(request, app_id):
+    """
+    Displays recommendations for a given app_id.
+    Uses query parameter 'type' to switch between 'content' and 'collaborative'.
+    Defaults to 'content'.
+    """
+    rec_type = request.GET.get('type', 'content').lower() # Default to content
+    recommendations_df = pd.DataFrame()
+    source_game_title = f"Game ID {app_id}"
+    error_message = None
+
+    try:
+        app_id_int = int(app_id) # Validate app_id early
+
+        if rec_type == 'collaborative':
+            print(f"Getting COLLABORATIVE recommendations for {app_id_int}")
+            # Pass the preloaded df_games if available
+            recommendations_df, source_game_title = get_collaborative_recommendations(
+                app_id=app_id_int,
+                n=12,
+                df_games=DF_GAMES_CACHE
+            )
+            if recommendations_df.empty:
+                 # Try content-based as fallback if collaborative fails? Or show error.
+                 error_message = f"Could not find collaborative recommendations for '{source_game_title}'. The game might not be in the interaction dataset."
+                 # Optionally, fallback to content:
+                 # print("Collaborative failed, falling back to content...")
+                 # rec_type = 'content'
+
+        # Use 'elif' to avoid running content if collaborative succeeded,
+        # or 'if' if you want content as a fallback.
+        if rec_type == 'content': # Changed to 'if' for fallback potential
+             if error_message is None: # Only run if collaborative didn't already fail
+                print(f"Getting CONTENT recommendations for {app_id_int}")
+                recommendations_df, source_game_title = get_content_recommendations(
+                    app_id=app_id_int,
+                    n=12
+                )
+                if recommendations_df.empty and error_message is None:
+                    error_message = f"Could not find content recommendations for '{source_game_title}'. The game might not be in the metadata or API fetch failed."
+
+        # Convert DataFrame to list of dictionaries for the template
+        # Handle potential NaT or NaN values for JSON serialization if needed
+        recommendations_list = []
+        if not recommendations_df.empty:
+             # Replace NaN with None for template rendering
+             recommendations_df = recommendations_df.replace({pd.NA: None, np.nan: None})
+             recommendations_list = recommendations_df.to_dict('records')
+
+
+    except ValueError:
+        error_message = f"Invalid App ID provided: {app_id}"
+        raise Http404(error_message)
+    except Exception as e:
+        print(f"An unexpected error occurred in recommendations_view: {e}")
+        error_message = "An error occurred while generating recommendations."
+        # Optionally re-raise or handle differently depending on desired user experience
+        # raise Http404(error_message) # Or render with error message
+
+    context = {
+        'source_game_title': source_game_title,
+        'app_id': app_id,
+        'recommendations': recommendations_list,
+        'recommendation_type': rec_type, # Pass the requested type
+        'error_message': error_message,
+    }
+    return render(request, 'steamrecommendations/recommendations_display.html', context)
+
+# Add a view for profile-based collaborative recommendations if needed
+def profile_recommendations_view(request):
+     # Assuming favorite_games comes from user session, profile, or request
+     favorite_games = request.session.get('favorite_games', []) # Example: Get from session
+     if not favorite_games:
+         # Handle case where user has no favorites
+         context = {'error_message': "Add some games to your favorites to get profile recommendations!"}
+         return render(request, 'steamrecommendations/recommendations_display.html', context)
+
+     recommendations_df, source_game_title = get_collaborative_recommendations(
+         favorite_games=favorite_games,
+         n=12,
+         df_games=DF_GAMES_CACHE
+     )
+     recommendations_list = []
+     if not recommendations_df.empty:
+         recommendations_df = recommendations_df.replace({pd.NA: None, np.nan: None})
+         recommendations_list = recommendations_df.to_dict('records')
+
+     context = {
+        'source_game_title': source_game_title, # Will be "Your Profile"
+        'app_id': None, # No single source app_id
+        'recommendations': recommendations_list,
+        'recommendation_type': 'collaborative_profile',
+        'error_message': None if not recommendations_df.empty else "Could not generate profile recommendations.",
+     }
+     return render(request, 'steamrecommendations/recommendations_display.html', context)
