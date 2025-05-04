@@ -1,0 +1,79 @@
+{% extends "steamrecommendations/base_generic.html" %}
+
+{% block title %}Game Recommendations for {{ source_game_title|default:"Selected Game" }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+
+    <h1 class="text-center pb-3">Recommendations</h1>
+
+
+    {% if error_message %}
+        <div class="alert alert-danger" role="alert">
+            {{ error_message }}
+        </div>
+    {% endif %}
+
+    {% if source_game_title %}
+        <div class="content-block mb-4">
+            <h2>
+                Based on: {{ source_game_title }}
+                {% if app_id %} (App ID: {{ app_id }}) {% endif %}
+            </h2>
+
+            {% if app_id %}
+            <div class="mt-3 mb-3">
+                <strong>View Recommendation Type:</strong>
+                <a href="?type=content" class="btn btn-sm {% if recommendation_type == 'content' %}btn-primary{% else %}btn-outline-primary{% endif %}">Content-Based</a>
+                <a href="?type=collaborative" class="btn btn-sm {% if recommendation_type == 'collaborative' %}btn-primary{% else %}btn-outline-primary{% endif %}">Item-Item Filtering</a>
+                <!-- Add link back to search or home -->
+                <a href="{% url 'index' %}" class="btn btn-sm btn-outline-secondary ms-2">Back to Home</a>
+            </div>
+            {% endif %}
+        </div>
+    {% endif %}
+
+
+    {% if recommendations %}
+        <h3 class="section-title">Showing {{ recommendation_type|title }} Recommendations:</h3>
+        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+            {% for game in recommendations %}
+            <div class="col">
+                <div class="card h-100 game-card">
+                    {% if game.header_image %}
+                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.app_id }}/header.jpg" class="card-img-top game-card-img" alt="{{ game.title }}">
+                    {% else %}
+                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.app_id }}/header.jpg" class="card-img-top game-card-img" alt="No image available">
+                    {% endif %}
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title game-card-title">{{ game.title }} ({{ game.app_id }})</h5>
+                        <p class="card-text small mb-1">
+                            Similarity: {{ game.similarity|floatformat:4 }}
+                            <span class="rec-type">({{ game.recommendation_type|title }})</span>
+                        </p>
+                        <p class="card-text small mb-1">Release Date: {{ game.date_release|default:"N/A" }}</p>
+                        <p class="card-text small mb-1">Rating: {{ game.rating|default:"N/A" }}</p>
+                        <p class="card-text small mb-1">Price: {{ game.price_final|default:"N/A" }}</p>
+                        {% if game.source_game_id %}
+                            <p class="card-text small fst-italic"><small>Source: {{ game.source_game_id }}</small></p>
+                        {% endif %}
+                    </div>
+                    <div class="card-footer">
+                        <a href="https://store.steampowered.com/app/{{ game.app_id }}/" target="_blank" class="btn btn-sm btn-steam">View on Steam</a>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <a href="{% url 'recommendations_view' game.app_id %}?type=content" class="btn btn-recs" title="Find similar (Content)">Content</a>
+                            <a href="{% url 'recommendations_view' game.app_id %}?type=collaborative" class="btn btn-recs" title="Find similar (Item-Item-Collaborative)">Collab</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% elif not error_message %}
+        <div class="content-block">
+            <p>No recommendations found for this game and recommendation type.</p>
+        </div>
+    {% endif %}
+
+</div>
+{% endblock content %}

@@ -22,10 +22,11 @@ from django.urls import include
 urlpatterns = [
     path('', views.index, name="index"),
     path('games/', views.games_list, name="game_list"),
-    path('recommended_games/', views.recommended_games, name="recommended_games"),
     path('user_survey/', views.user_survey, name="user_survey"),
     path('search/', views.search_games, name="search_games"),
     path('recommend/<int:app_id>/', views.recommendations_for_game, name="recommendations_for_game"),
-    path('collaborative/<int:app_id>/', views.collaborative_recommendations_for_game, name="collaborative_recommendations_for_game"),
     path('about/', views.about, name="about"),
+    path('recommendations/<int:app_id>/', views.recommendations_view, name="recommendations_view"),  # Add this line
+    path('recommendations/<str:app_id>/', views.recommendations_view, name='recommendations_view'),
+
 ]

@@ -189,6 +189,7 @@ def recommendations_view(request, app_id):
     recommendations_df = pd.DataFrame()
     source_game_title = f"Game ID {app_id}"
     error_message = None
+    recommendations_list = [] # Initialize recommendations_list before the try block
 
     try:
         app_id_int = int(app_id) # Validate app_id early
@@ -222,7 +223,7 @@ def recommendations_view(request, app_id):
 
         # Convert DataFrame to list of dictionaries for the template
         # Handle potential NaT or NaN values for JSON serialization if needed
-        recommendations_list = []
+        # recommendations_list = [] # Moved initialization outside the try block
         if not recommendations_df.empty:
              # Replace NaN with None for template rendering
              recommendations_df = recommendations_df.replace({pd.NA: None, np.nan: None})
@@ -231,7 +232,7 @@ def recommendations_view(request, app_id):
 
     except ValueError:
         error_message = f"Invalid App ID provided: {app_id}"
-        raise Http404(error_message)
+        # raise Http404(error_message) # Changed to render with error message instead of 404
     except Exception as e:
         print(f"An unexpected error occurred in recommendations_view: {e}")
         error_message = "An error occurred while generating recommendations."

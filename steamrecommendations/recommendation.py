@@ -373,114 +373,135 @@ def get_content_recommendations(app_id, n=12, min_similarity=0.08):
     tfidf, tfidf_matrix, df_games, df_meta = load_model_and_data()
 
     if tfidf is None or tfidf_matrix is None or df_games is None or df_meta is None:
-        print(f"Failed to load model/data for recommendations for app_id {app_id}")
+        print(f"✗ Failed to load model/data for recommendations for app_id {app_id}")
+        # Try to get title from API as fallback
         _, source_game_title = get_steam_app_details(app_id)
         return pd.DataFrame(), source_game_title if source_game_title else f"Game ID {app_id}"
+    else:
+        print("✓ Model and data loaded successfully.")
 
     source_game_title = f"Game ID {app_id}" # Default title
     app_id_int = None
     enhanced_data = None
+    cosine_sim = None # Initialize cosine_sim
+
     try:
         # Ensure app_id is integer
         app_id_int = int(app_id)
-        
+        print(f"✓ Processing recommendations for App ID: {app_id_int}")
+
         # Find the index in the metadata dataframe
         idx_series = df_meta[df_meta['app_id'] == app_id_int].index
         if not idx_series.empty:
             idx = idx_series[0]
-            
+            print(f"✓ Game found in local metadata at index {idx}.")
+
             # Check if this game has good metadata (tags and description)
             has_good_metadata = True
-            if ('tags_str' not in df_meta.columns or 
-                pd.isna(df_meta.loc[idx, 'tags_str']) or 
+            if ('tags_str' not in df_meta.columns or
+                pd.isna(df_meta.loc[idx, 'tags_str']) or
                 df_meta.loc[idx, 'tags_str'].strip() == '' or
                 'description' not in df_meta.columns or
                 pd.isna(df_meta.loc[idx, 'description']) or
                 df_meta.loc[idx, 'description'].strip() == ''):
-                
+
                 has_good_metadata = False
-                print(f"Game {app_id_int} has incomplete metadata. Attempting to enhance...")
-                
+                print(f"ℹ Game {app_id_int} has incomplete metadata. Attempting to enhance via Steam API...")
+
                 # Try to fetch enhanced data
-                enhanced_data = get_enhanced_game_data(app_id_int)
-                if enhanced_data and enhanced_data['tags']:
-                    print(f"Successfully enhanced metadata for {app_id_int}")
-                    
+                enhanced_data = get_enhanced_game_data(app_id_int) # Uses the enhanced fetcher
+                if enhanced_data and enhanced_data.get('combined_text'): # Check if we got useful text
+                    print(f"✓ Successfully enhanced metadata for {app_id_int}")
+
                     # Process with the enhanced data directly
-                    # We'll transform this single enhanced text using the existing TF-IDF model
                     enhanced_text = enhanced_data['combined_text']
                     app_vector = tfidf.transform([enhanced_text])
+                    print(f"✓ Transformed enhanced text for {app_id_int}")
                     cosine_sim = linear_kernel(app_vector, tfidf_matrix).flatten()
-                    
+                    print(f"✓ Calculated similarity using enhanced data.")
+
                     # Update title from enhanced data
-                    source_game_title = enhanced_data['title']
+                    source_game_title = enhanced_data.get('title', f"Game ID {app_id_int}")
                 else:
                     # If we couldn't enhance, continue with what we have
-                    print(f"Could not enhance metadata for {app_id_int}, using existing data")
-            
-            # If we didn't use enhanced data, use the existing row from df_meta
-            if not enhanced_data:
+                    print(f"✗ Could not enhance metadata for {app_id_int}, using existing (potentially incomplete) data.")
+                    # Fall through to use existing matrix row
+
+            # If we didn't use enhanced data (either it was good initially or enhancement failed)
+            if cosine_sim is None: # Check if cosine_sim wasn't calculated yet
                 # Get title from df_games if possible
                 source_game_title_series = df_games[df_games['app_id'] == app_id_int]['title']
                 if not source_game_title_series.empty:
                     source_game_title = source_game_title_series.iloc[0]
-                else: # Fallback to API if not in df_games
+                else: # Fallback to API if not in df_games (should be rare if in df_meta)
                     _, api_title = get_steam_app_details(app_id_int)
                     if api_title: source_game_title = api_title
 
                 # Compute similarity using existing matrix row
-                print(f"Calculating similarity for existing game {app_id_int} ('{source_game_title}', index {idx})")
+                print(f"✓ Calculating similarity for existing game {app_id_int} ('{source_game_title}', index {idx}) using precomputed matrix.")
                 cosine_sim = linear_kernel(tfidf_matrix[idx:idx+1], tfidf_matrix).flatten()
         else:
             # Game not found in df_meta, trigger cold start logic below
-            raise IndexError("Game not found in metadata")
+            print(f"ℹ Game {app_id_int} not found in local metadata.")
+            raise IndexError("Game not found in metadata") # Raise to enter cold start
 
     except (IndexError, ValueError, TypeError) as e:
         # --- Cold Start Logic ---
-        print(f"Game with app_id '{app_id}' not found in the local metadata. Attempting cold start via Steam API... ({e})")
+        print(f"ℹ Attempting cold start for App ID '{app_id}' via Steam API... (Triggered by: {e})")
         if app_id_int is None: # Handle case where initial int conversion failed
             try: app_id_int = int(app_id)
             except (ValueError, TypeError):
-                print(f"Invalid app_id format for cold start: {app_id}")
+                print(f"✗ Invalid app_id format for cold start: {app_id}")
                 return pd.DataFrame(), f"Invalid Game ID {app_id}"
 
         # Try to get enhanced data first (more complete)
         enhanced_data = get_enhanced_game_data(app_id_int)
-        if enhanced_data:
-            source_game_title = enhanced_data['title']
+        source_tags = None # Initialize source_tags
+
+        if enhanced_data and enhanced_data.get('combined_text'):
+            source_game_title = enhanced_data.get('title', f"Game ID {app_id_int}")
             app_text = enhanced_data['combined_text']
-            source_tags = set(enhanced_data['tags_str'].lower().split())
+            source_tags = set(enhanced_data.get('tags_str', '').lower().split()) # Get tags if available
+            print(f"✓ Cold Start: Fetched enhanced data for '{source_game_title}'.")
         else:
-            # Fall back to basic API call
-            app_text, api_source_title = get_steam_app_details(app_id_int)
-            source_game_title = api_source_title
-            source_tags = None  # We don't have tags from the basic API call
+            # Fall back to basic API call if enhanced failed
+            print(f"ℹ Cold Start: Enhanced data fetch failed or incomplete for {app_id_int}. Trying basic API call...")
+            app_text, api_source_title = get_steam_app_details(app_id_int) # Basic fetcher
+            source_game_title = api_source_title # Use title from basic API
+            # No reliable tags from basic API call
+            if app_text:
+                 print(f"✓ Cold Start: Fetched basic data for '{source_game_title}'.")
 
         if app_text:
             try:
                 # Transform the new game's text using the loaded TF-IDF model
-                print(f"Transforming text for cold start game {app_id_int}")
+                print(f"✓ Cold Start: Transforming text for {app_id_int} ('{source_game_title}')")
                 app_vector = tfidf.transform([app_text])
                 # Compute similarity against the entire existing matrix
-                print(f"Calculating similarity for cold start game {app_id_int}")
+                print(f"✓ Cold Start: Calculating similarity for {app_id_int}")
                 cosine_sim = linear_kernel(app_vector, tfidf_matrix).flatten()
-                print(f"Successfully generated recommendations for {app_id_int} via cold start.")
-            except Exception as e:
-                print(f"Error processing cold start vector for {app_id_int}: {e}")
-                # Try tag-based as last resort if we have tags
+                print(f"✓ Cold Start: Successfully generated TF-IDF recommendations for {app_id_int}.")
+            except Exception as e_process:
+                print(f"✗ Cold Start: Error processing TF-IDF vector for {app_id_int}: {e_process}")
+                # Try tag-based as last resort if we have tags from enhanced data
                 if source_tags and len(source_tags) > 0:
+                    print(f"ℹ Cold Start: Attempting tag-based fallback for {app_id_int}...")
                     tag_recs = get_tag_based_recommendations(app_id_int, df_meta, df_games, source_tags, n)
                     if not tag_recs.empty:
+                        print(f"✓ Cold Start: Found {len(tag_recs)} recommendations via tag-based fallback.")
+                        tag_recs['recommendation_type'] = 'content_tags_cold_start'
                         return tag_recs, source_game_title
-                return pd.DataFrame(), source_game_title
+                    else:
+                         print(f"✗ Cold Start: Tag-based fallback failed for {app_id_int}.")
+                return pd.DataFrame(), source_game_title # Return empty if TF-IDF and tags failed
         else:
-            print(f"Could not fetch data for cold start for app_id {app_id_int}.")
-            return pd.DataFrame(), source_game_title
+            print(f"✗ Cold Start: Could not fetch any data via Steam API for app_id {app_id_int}.")
+            return pd.DataFrame(), source_game_title # Return empty if API fails completely
         # --- End Cold Start Logic ---
 
-    # If cosine_sim was not calculated (e.g., cold start failed before calculation)
-    if 'cosine_sim' not in locals():
-        print(f"Cosine similarity calculation failed for {app_id}")
+    # If cosine_sim was not calculated (e.g., error before calculation)
+    if cosine_sim is None:
+        print(f"✗ Cosine similarity calculation failed unexpectedly for {app_id}")
         return pd.DataFrame(), source_game_title
 
     # Get similarity scores (index, score)
@@ -491,66 +512,113 @@ def get_content_recommendations(app_id, n=12, min_similarity=0.08):
     # Print the highest similarity score for debugging
     if sim_scores:
         highest_similarity = sim_scores[0][1]
-        print(f"Highest similarity score for {app_id_int} ('{source_game_title}'): {highest_similarity:.4f}")
-    
-    # Exclude self if the game was found in the original dataset ('idx' is defined)
-    if 'idx' in locals() and idx is not None:
-        sim_scores = [score for score in sim_scores if score[0] != idx]
-
-    # Filter by minimum similarity threshold
-    relevant_scores = [score for score in sim_scores if score[1] >= min_similarity]
-    
-    # If we have enough relevant recommendations, use those
-    # Otherwise try tag-based recommendations if we have enhanced data with tags
-    if len(relevant_scores) >= 3:
-        print(f"Found {len(relevant_scores)} games with similarity >= {min_similarity}")
-        sim_scores = relevant_scores[:n]
+        print(f"✓ Highest TF-IDF similarity score for {app_id_int} ('{source_game_title}'): {highest_similarity:.4f}")
     else:
-        print(f"WARNING: Only {len(relevant_scores)} games with similarity >= {min_similarity}")
-        
-        # Try tag-based approach if TF-IDF gave poor results
-        if enhanced_data and enhanced_data['tags']:
-            print(f"Trying tag-based recommendations for {app_id_int} with enhanced tags")
-            source_tags = set(enhanced_data['tags_str'].lower().split())
-            tag_recs = get_tag_based_recommendations(app_id_int, df_meta, df_games, source_tags, n)
-            
-            if not tag_recs.empty and len(tag_recs) >= 3:
-                print(f"Using tag-based recommendations for {app_id_int}")
-                return tag_recs, source_game_title
-        
-        # If tag-based also failed or wasn't attempted, use the best TF-IDF scores we have
-        sim_scores = sim_scores[:n]
-
-    # Get recommended game indices
-    game_indices = [i[0] for i in sim_scores]
-    # Ensure indices are within bounds of df_meta
-    valid_indices = [idx for idx in game_indices if idx < len(df_meta)]
-    if len(valid_indices) != len(game_indices):
-        print(f"Warning: Some recommendation indices were out of bounds for df_meta (length {len(df_meta)})")
-        game_indices = valid_indices
-
-    if not game_indices:
-        print(f"No valid recommendation indices found for {app_id}")
+        print(f"✗ No similarity scores generated for {app_id_int}.")
         return pd.DataFrame(), source_game_title
 
+    # Exclude self if the game was found in the original dataset ('idx' is defined and game wasn't enhanced)
+    # If enhanced_data was used, idx might not be relevant to the cosine_sim vector source, so don't exclude based on it.
+    if 'idx' in locals() and idx is not None and not enhanced_data:
+        original_length = len(sim_scores)
+        sim_scores = [score for score in sim_scores if score[0] != idx]
+        if len(sim_scores) < original_length:
+             print(f"✓ Removed self-recommendation (index {idx})")
+
+    # Filter by minimum similarity threshold
+    original_length = len(sim_scores)
+    relevant_scores = [score for score in sim_scores if score[1] >= min_similarity]
+    print(f"✓ Found {len(relevant_scores)} games with similarity >= {min_similarity} (out of {original_length} potential).")
+
+    # Decide whether to use TF-IDF or attempt tag-based fallback
+    final_sim_scores = []
+    recommendation_source = "content_tfidf" # Default source
+
+    # Use TF-IDF if enough relevant scores OR if tag fallback is not possible/fails
+    if len(relevant_scores) >= 3:
+        print(f"✓ Using top {n} TF-IDF recommendations.")
+        final_sim_scores = relevant_scores[:n]
+    else:
+        print(f"ℹ WARNING: Only {len(relevant_scores)} TF-IDF games found with similarity >= {min_similarity}. Trying tag-based fallback...")
+
+        # Determine tags for fallback
+        fallback_tags = None
+        if enhanced_data and enhanced_data.get('tags_str'):
+            fallback_tags = set(enhanced_data['tags_str'].lower().split())
+            print("✓ Using tags from enhanced API data for fallback.")
+        elif 'idx' in locals() and idx is not None and 'tags_str' in df_meta.columns:
+            meta_tags = df_meta.loc[idx, 'tags_str']
+            if pd.notna(meta_tags) and meta_tags.strip():
+                fallback_tags = set(meta_tags.lower().split())
+                print("✓ Using tags from local metadata for fallback.")
+
+        # Attempt tag-based fallback if tags are available
+        if fallback_tags and len(fallback_tags) > 0:
+            tag_recs_df = get_tag_based_recommendations(app_id_int, df_meta, df_games, fallback_tags, n)
+
+            if not tag_recs_df.empty and len(tag_recs_df) >= 3:
+                print(f"✓ Using {len(tag_recs_df)} tag-based recommendations as fallback.")
+                tag_recs_df['recommendation_type'] = 'content_tags_fallback'
+                return tag_recs_df, source_game_title # Return tag results directly
+            else:
+                print(f"✗ Tag-based fallback failed or yielded too few results ({len(tag_recs_df)}).")
+        else:
+             print(f"✗ No usable tags found for tag-based fallback.")
+
+        # If tag-based fallback failed or wasn't attempted, use the best TF-IDF scores we have, even if few
+        print(f"✓ Reverting to using the top {n} available TF-IDF scores (even if below threshold or count).")
+        final_sim_scores = sim_scores[:n] # Use the original sorted list before thresholding
+
+    # --- Process final TF-IDF recommendations ---
+    if not final_sim_scores:
+         print(f"✗ No recommendations generated for {app_id_int} ('{source_game_title}') after all steps.")
+         return pd.DataFrame(), source_game_title
+
+    # Get recommended game indices from final scores
+    game_indices = [i[0] for i in final_sim_scores]
+
+    # Ensure indices are within bounds of df_meta
+    valid_indices = [i for i in game_indices if i < len(df_meta)]
+    if len(valid_indices) != len(game_indices):
+        print(f"✗ Warning: {len(game_indices) - len(valid_indices)} recommendation indices were out of bounds for df_meta (length {len(df_meta)})")
+        game_indices = valid_indices
+        # Update final_sim_scores to match valid indices
+        final_sim_scores = [score for score in final_sim_scores if score[0] in valid_indices]
+
+
+    if not game_indices:
+        print(f"✗ No valid recommendation indices found for {app_id} after bounds check.")
+        return pd.DataFrame(), source_game_title
+
+    # Get details for recommended games
     recommended_app_ids = df_meta.iloc[game_indices]['app_id'].values
     recommended_games = df_games[df_games['app_id'].isin(recommended_app_ids)].copy()
 
-    # Add similarity scores
-    sim_dict_by_index = {i: score for i, score in sim_scores}
-    index_to_appid = df_meta.iloc[game_indices]['app_id'].to_dict()
+    # Add similarity scores from the final list
+    sim_dict_by_index = {i: score for i, score in final_sim_scores}
+    # Map df_meta index to app_id for the recommended games
+    index_to_appid = df_meta.iloc[game_indices][['app_id']].reset_index().set_index('index')['app_id'].to_dict() # Map index -> app_id
+    # Create app_id -> similarity mapping
     sim_dict_by_appid = {app_id: sim_dict_by_index[index] for index, app_id in index_to_appid.items() if index in sim_dict_by_index}
 
     recommended_games['similarity'] = recommended_games['app_id'].map(sim_dict_by_appid)
-    recommended_games['similarity'] = recommended_games['similarity'].fillna(0)
+    recommended_games['similarity'] = recommended_games['similarity'].fillna(0) # Fill NaNs just in case
     recommended_games = recommended_games.sort_values('similarity', ascending=False)
 
-    # Ensure essential columns exist
-    for col in ['app_id', 'title', 'date_release', 'rating', 'price_final', 'similarity']:
-        if col not in recommended_games.columns:
-            recommended_games[col] = None if col != 'similarity' else 0
+    # Add recommendation type
+    recommended_games['recommendation_type'] = recommendation_source # 'content_tfidf'
 
-    print(f"Returning {len(recommended_games)} recommendations for {app_id} ('{source_game_title}')")
+    # Ensure essential columns exist
+    final_cols_ordered = ['app_id', 'title', 'similarity', 'date_release', 'rating', 'price_final', 'recommendation_type']
+    for col in final_cols_ordered:
+        if col not in recommended_games.columns:
+            if col == 'similarity': recommended_games[col] = 0
+            elif col == 'recommendation_type': recommended_games[col] = recommendation_source
+            else: recommended_games[col] = None # Add missing columns like rating, price etc. if needed
+
+    recommended_games = recommended_games[final_cols_ordered] # Reorder/select final columns
+
+    print(f"✓ Returning {len(recommended_games)} {recommendation_source} recommendations for {app_id} ('{source_game_title}')")
     return recommended_games, source_game_title
 
 
@@ -571,13 +639,15 @@ def get_collaborative_recommendations(app_id=None, favorite_games=None, n=12, df
     
     Returns:
         DataFrame: Recommendations with app_id, title, similarity score, etc.
+                   Includes a 'recommendation_type' column set to 'collaborative'.
+        str: Title of the source game (if single game mode) or generic title.
     """
     global _item_similarity_cache, _df_games_cache
     
     # Validate inputs
     if app_id is None and (not favorite_games or len(favorite_games) == 0):
         print("Error: Either app_id or favorite_games must be provided")
-        return pd.DataFrame()
+        return pd.DataFrame(), "N/A"
     
     # Load item similarity matrix if not already in cache
     if _item_similarity_cache is None:
@@ -587,10 +657,10 @@ def get_collaborative_recommendations(app_id=None, favorite_games=None, n=12, df
             print(f"Loaded similarity matrix with shape {_item_similarity_cache.shape}")
         except FileNotFoundError:
             print(f"Error: Item similarity matrix not found at {ITEM_SIMILARITY_PATH}")
-            return pd.DataFrame()
+            return pd.DataFrame(), "N/A"
         except Exception as e:
             print(f"Error loading item similarity matrix: {e}")
-            return pd.DataFrame()
+            return pd.DataFrame(), "N/A"
     
     # Use the provided df_games or load from cache/function
     if df_games is None:
@@ -598,25 +668,48 @@ def get_collaborative_recommendations(app_id=None, favorite_games=None, n=12, df
             df_games = _df_games_cache
         else:
             # Load from your existing function
-            _, _, df_games, _ = load_model_and_data()
-            _df_games_cache = df_games
+            _, _, df_games_loaded, _ = load_model_and_data()
+            if df_games_loaded is None:
+                 print("Failed to load game data for collaborative filtering.")
+                 return pd.DataFrame(), "N/A"
+            _df_games_cache = df_games_loaded
+            df_games = df_games_loaded # Use the loaded data
     
     if df_games is None or df_games.empty:
-        print("No game data available")
-        return pd.DataFrame()
+        print("No game data available for collaborative filtering")
+        return pd.DataFrame(), "N/A"
     
     sim_matrix = _item_similarity_cache
+    source_game_title = "Your Profile" # Default for favorite_games mode
     
     # Track which recommendations came from which source game
     all_recommendations = {}  # app_id -> (max_similarity, source_app_id)
     
     if app_id is not None:
         # Mode 1: Recommendations based on a single game
-        app_id_int = int(app_id)
+        try:
+            app_id_int = int(app_id)
+        except (ValueError, TypeError):
+            print(f"Invalid app_id format: {app_id}")
+            return pd.DataFrame(), f"Invalid Game ID {app_id}"
+
         if app_id_int not in sim_matrix.index:
             print(f"Game {app_id_int} not found in similarity matrix")
-            return pd.DataFrame()
+            # Try to get title from df_games as fallback
+            source_game_info = df_games[df_games['app_id'] == app_id_int]
+            if not source_game_info.empty:
+                source_game_title = source_game_info['title'].iloc[0]
+            else:
+                source_game_title = f"Game ID {app_id_int}"
+            return pd.DataFrame(), source_game_title
         
+        # Get source game title
+        source_game_info = df_games[df_games['app_id'] == app_id_int]
+        if not source_game_info.empty:
+            source_game_title = source_game_info['title'].iloc[0]
+        else:
+            source_game_title = f"Game ID {app_id_int}" # Fallback if not in df_games
+
         # Get similar items for this game
         similar_items = sim_matrix.loc[app_id_int]
         # Remove self-similarity
@@ -624,8 +717,8 @@ def get_collaborative_recommendations(app_id=None, favorite_games=None, n=12, df
         
         # Convert to dictionary for consistent processing
         for item_id, score in similar_items.items():
-            # Don't include negative similarities
-            if score > 0:
+            # Don't include negative similarities or very low scores
+            if score > 0.01: # Threshold can be adjusted
                 all_recommendations[item_id] = (score, app_id_int)
     
     else:
@@ -643,7 +736,7 @@ def get_collaborative_recommendations(app_id=None, favorite_games=None, n=12, df
         
         if not valid_favorites:
             print("No valid favorite games found in similarity matrix")
-            return pd.DataFrame()
+            return pd.DataFrame(), source_game_title # Return default title "Your Profile"
         
         # For each favorite game, get similar items
         for fav_id in valid_favorites:
@@ -654,17 +747,17 @@ def get_collaborative_recommendations(app_id=None, favorite_games=None, n=12, df
             
             # Add to recommendations dict, keeping highest score if already exists
             for item_id, score in similar_items.items():
-                if score > 0:  # Only positive similarities
+                if score > 0.01:  # Only positive similarities above threshold
                     if item_id not in all_recommendations or score > all_recommendations[item_id][0]:
                         all_recommendations[item_id] = (score, fav_id)
     
     if not all_recommendations:
         print("No recommendations found")
-        return pd.DataFrame()
+        return pd.DataFrame(), source_game_title
     
     # Convert recommendations to DataFrame
-    rec_data = [(app_id, sim, src) for app_id, (sim, src) in all_recommendations.items()]
-    rec_df = pd.DataFrame(rec_data, columns=['app_id', 'similarity', 'source_game'])
+    rec_data = [(rec_app_id, sim, src) for rec_app_id, (sim, src) in all_recommendations.items()]
+    rec_df = pd.DataFrame(rec_data, columns=['app_id', 'similarity', 'source_game_id']) # Renamed source_game to source_game_id
     
     # Sort by similarity score
     rec_df = rec_df.sort_values('similarity', ascending=False)
@@ -673,12 +766,45 @@ def get_collaborative_recommendations(app_id=None, favorite_games=None, n=12, df
     rec_df = rec_df.head(n)
     
     # Merge with game details
-    result = pd.merge(rec_df, df_games, on='app_id', how='inner')
+    # Ensure df_games has the necessary columns
+    required_cols = ['app_id', 'title', 'date_release', 'rating', 'price_final']
+    if not all(col in df_games.columns for col in required_cols):
+        print(f"Warning: df_games is missing one or more required columns: {required_cols}")
+        # Select only available columns from df_games to merge
+        available_cols = ['app_id'] + [col for col in required_cols if col in df_games.columns and col != 'app_id']
+        df_games_subset = df_games[available_cols].copy() # Use copy to avoid SettingWithCopyWarning
+    else:
+        df_games_subset = df_games[required_cols].copy() # Use copy to avoid SettingWithCopyWarning
+
+    # Ensure app_id types match for merging
+    rec_df['app_id'] = rec_df['app_id'].astype(int)
+    df_games_subset['app_id'] = df_games_subset['app_id'].astype(int)
+
+    result = pd.merge(rec_df, df_games_subset, on='app_id', how='inner')
     
     # If no matches were found after merging
     if result.empty:
         print("No recommendations were found in the game details database")
-        return pd.DataFrame()
-    
+        return pd.DataFrame(), source_game_title
+        
+    # Add recommendation type
+    result['recommendation_type'] = 'collaborative'
+
+    # Ensure final columns exist, adding 'similarity' from rec_df
+    final_cols = required_cols + ['similarity', 'source_game_id', 'recommendation_type']
+    for col in final_cols:
+        if col not in result.columns:
+            # Handle potential missing columns from the merge or original df_games
+            if col in rec_df.columns:
+                 result[col] = rec_df[col] # Get from rec_df if available (like similarity)
+            elif col == 'recommendation_type':
+                 result[col] = 'collaborative' # Should already be set, but as fallback
+            else:
+                 result[col] = None if col != 'similarity' else 0 # Default value
+
+    # Reorder columns for clarity
+    final_cols_ordered = [col for col in ['app_id', 'title', 'similarity', 'date_release', 'rating', 'price_final', 'recommendation_type', 'source_game_id'] if col in result.columns]
+    result = result[final_cols_ordered]
+
     print(f"Generated {len(result)} collaborative filtering recommendations")
-    return result
+    return result, source_game_title

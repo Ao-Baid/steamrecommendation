@@ -1,4 +1,3 @@
-<!-- filepath: c:\Users\aobai\Documents\Programming Stuff\Steam Game Recommendation Website\steamrecommendation\steamrecommendations\templates\steamrecommendations\search_results.html -->
 {% extends "steamrecommendations/base_generic.html" %}
 
 {% block title %}Search Results for "{{ query }}"{% endblock %}
@@ -28,7 +27,10 @@
                                 </small>
                             </p>
                         </div>
-                        <a href="{% url 'recommendations_for_game' game.app_id %}" class="btn btn-sm btn-info align-self-start">Get Recommendations</a>
+                        <div class="d-flex flex-column gap-1 align-items-end">
+                            <a href="{% url 'recommendations_view' game.app_id %}?type=content" class="btn btn-sm btn-info">Find similar (Content)</a>
+                            <a href="{% url 'recommendations_view' game.app_id %}?type=collaborative" class="btn btn-sm btn-secondary">Find similar (Collaborative)</a>
+                        </div>
                     </div>
                 </div>
             {% endfor %}
