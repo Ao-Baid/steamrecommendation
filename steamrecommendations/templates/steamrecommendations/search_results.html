@@ -10,12 +10,12 @@
         <p>{{ results|length }} game(s) found.</p>
         <div class="list-group">
             {% for game in results %}
-                <div class="list-group-item list-group-item-action d-flex gap-3 py-3" aria-current="true">
+                <div class="list-group-item list-group-item-action d-flex gap-3 py-3 align-items-center" aria-current="true"> {# Added align-items-center #}
                     <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.app_id }}/header.jpg"
                          alt="{{ game.title }} thumbnail"
                          width="120" height="56" class="rounded flex-shrink-0"
                          onerror="this.onerror=null; this.src='https://via.placeholder.com/120x56?text=No+Image'; this.style.objectFit='cover';">
-                    <div class="d-flex gap-2 w-100 justify-content-between">
+                    <div class="d-flex gap-2 w-100 justify-content-between align-items-center"> {# Added align-items-center #}
                         <div>
                             <h6 class="mb-0">{{ game.title }}</h6>
                             <p class="mb-0 opacity-75">
@@ -23,13 +23,15 @@
                                     ID: {{ game.app_id }}
                                     {% if game.date_release %}| Released: {{ game.date_release }}{% endif %}
                                     {% if game.rating %}| Rating: {{ game.rating }}{% endif %}
-                                    {% if game.price_final is not None %}| Price: ${{ game.price_final|floatformat:2 }}{% endif %}
+                                    {% if game.price_final is not None %}| Price: ${% if game.price_final > 0 %}{{ game.price_final|floatformat:2 }}{% else %}Free{% endif %}{% endif %} {# Improved Price Display #}
                                 </small>
                             </p>
                         </div>
-                        <div class="d-flex flex-column gap-1 align-items-end">
-                            <a href="{% url 'recommendations_view' game.app_id %}?type=content" class="btn btn-sm btn-info">Find similar (Content)</a>
-                            <a href="{% url 'recommendations_view' game.app_id %}?type=collaborative" class="btn btn-sm btn-secondary">Find similar (Collaborative)</a>
+                        {# Changed flex-column to flex-row (default) and wrapped in btn-group #}
+                        <div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="Recommendation types">
+                            <a href="{% url 'recommendations_view' game.app_id %}?type=content" class="btn btn-outline-primary">Content</a>
+                            <a href="{% url 'recommendations_view' game.app_id %}?type=collaborative" class="btn btn-outline-secondary">Collab</a>
+                            <a href="{% url 'recommendations_view' game.app_id %}?type=hybrid" class="btn btn-outline-success">Hybrid</a>
                         </div>
                     </div>
                 </div>

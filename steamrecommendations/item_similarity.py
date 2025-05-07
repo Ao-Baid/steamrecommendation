@@ -193,8 +193,3 @@ def calculate_and_save_item_similarity(recs_path='data/recommendations_reduced.c
     print("Item similarity calculation complete.")
     return True
 
-# Example of how to run if needed (e.g., for testing)
-# if __name__ == "__main__":
-#     import sys
-#     success = calculate_and_save_item_similarity()
-#     sys.exit(0 if success else 1)

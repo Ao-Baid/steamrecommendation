@@ -5,7 +5,7 @@ from django.http import HttpResponse, Http404
 from django.core.cache import cache
 from django.urls import reverse
 from django.contrib import messages
-from .recommendation import get_content_recommendations, load_model_and_data, get_collaborative_recommendations
+from .recommendation import get_content_recommendations, load_model_and_data, get_collaborative_recommendations, get_hybrid_recommendations
 import pandas as pd
 import random
 import requests
@@ -205,12 +205,19 @@ def recommendations_view(request, app_id):
             if recommendations_df.empty:
                  # Try content-based as fallback if collaborative fails? Or show error.
                  error_message = f"Could not find collaborative recommendations for '{source_game_title}'. The game might not be in the interaction dataset."
-                 # Optionally, fallback to content:
-                 # print("Collaborative failed, falling back to content...")
-                 # rec_type = 'content'
 
-        # Use 'elif' to avoid running content if collaborative succeeded,
-        # or 'if' if you want content as a fallback.
+            
+        elif rec_type == 'hybrid':
+            print(f"Getting HYBRID recommendations for {app_id_int}")
+            recommendations_df, source_game_title = get_hybrid_recommendations(
+                app_id=app_id_int,
+                n=12,
+                df_games=DF_GAMES_CACHE
+            )
+            if recommendations_df.empty:
+                error_message = f"Could not find hybrid recommendations for '{source_game_title}'. The game might not be in the interaction dataset."
+
+
         if rec_type == 'content': # Changed to 'if' for fallback potential
              if error_message is None: # Only run if collaborative didn't already fail
                 print(f"Getting CONTENT recommendations for {app_id_int}")
@@ -225,8 +232,12 @@ def recommendations_view(request, app_id):
         # Handle potential NaT or NaN values for JSON serialization if needed
         # recommendations_list = [] # Moved initialization outside the try block
         if not recommendations_df.empty:
-             # Replace NaN with None for template rendering
+             # Replace NaN/NaT with None for template rendering
              recommendations_df = recommendations_df.replace({pd.NA: None, np.nan: None})
+             # Convert specific columns if necessary (e.g., dates to strings)
+             if 'date_release' in recommendations_df.columns:
+                 # Ensure it's string or None, handle potential Timestamps
+                 recommendations_df['date_release'] = recommendations_df['date_release'].astype(str).replace({'NaT': None, 'nan': None})
              recommendations_list = recommendations_df.to_dict('records')
 
 
@@ -235,9 +246,10 @@ def recommendations_view(request, app_id):
         # raise Http404(error_message) # Changed to render with error message instead of 404
     except Exception as e:
         print(f"An unexpected error occurred in recommendations_view: {e}")
+        import traceback
+        traceback.print_exc() 
         error_message = "An error occurred while generating recommendations."
-        # Optionally re-raise or handle differently depending on desired user experience
-        # raise Http404(error_message) # Or render with error message
+
 
     context = {
         'source_game_title': source_game_title,

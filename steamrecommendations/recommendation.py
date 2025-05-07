@@ -1,14 +1,13 @@
 # filepath: c:\Users\aobai\Documents\Programming Stuff\Steam Game Recommendation Website\steamrecommendation\steamrecommendations\recommendations.py
 import pandas as pd
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 from django.core.cache import cache
+from .tf_idf_training import train_and_save_model, _clean_html # Import the training function
 import os
 import joblib # For saving/loading the model
 import requests
 import json
-from bs4 import BeautifulSoup
 
 DATA_DIR = './data'
 MODEL_DIR = './model_cache' # Directory to save/load the model
@@ -22,77 +21,6 @@ APP_ID_MAP_PATH = os.path.join(MODEL_DIR, 'item_similarity_app_id_map.joblib') #
 # Cache for loaded similarity matrix
 _item_similarity_cache = None
 _df_games_cache = None  # Assuming you have a global df_games cache elsewhere
-
-
-def load_data():
-    """Loads the necessary dataframes."""
-    try:
-        df_games = pd.read_csv(os.path.join(DATA_DIR, 'games.csv'), dtype={'app_id': 'int32', 'title': 'string'})
-        df_games_meta = pd.read_json(os.path.join(DATA_DIR, 'games_metadata.json'), lines=True, orient="records")
-        # Ensure app_id is integer for merging
-        df_games_meta['app_id'] = pd.to_numeric(df_games_meta['app_id'], errors='coerce')
-        df_games['app_id'] = pd.to_numeric(df_games['app_id'], errors='coerce')
-        # Drop rows where app_id could not be converted in either dataframe
-        df_games_meta.dropna(subset=['app_id'], inplace=True)
-        df_games.dropna(subset=['app_id'], inplace=True)
-        df_games_meta['app_id'] = df_games_meta['app_id'].astype(int)
-        df_games['app_id'] = df_games['app_id'].astype(int)
-        return df_games, df_games_meta
-    except FileNotFoundError:
-        print("Error: Data files not found in ./data directory.")
-        return None, None
-    except Exception as e:
-        print(f"Error loading data: {e}")
-        return None, None
-
-# Removed sample_size parameter as we use the full dataset now
-def train_and_save_model(force_retrain=False):
-    """Trains the TF-IDF model on the FULL dataset and saves it."""
-    os.makedirs(MODEL_DIR, exist_ok=True)
-
-    # Check if full model files exist
-    if not force_retrain and os.path.exists(TFIDF_MODEL_PATH) and os.path.exists(TFIDF_MATRIX_PATH) and os.path.exists(GAMES_DF_PATH) and os.path.exists(META_DF_PATH):
-        print("Full model and data already exist. Skipping training.")
-        return
-
-    print("Loading data for full training...")
-    df_games, df_games_meta = load_data()
-    if df_games is None or df_games_meta is None:
-        print("Failed to load data for training.")
-        return
-
-    print(f"Using full metadata size: {len(df_games_meta)}")
-    # Basic cleaning (already done in load_data, but ensure no NaN app_id)
-    df_games_meta.dropna(subset=['app_id'], inplace=True)
-    df_games_meta['app_id'] = df_games_meta['app_id'].astype(int)
-
-    if df_games_meta.empty:
-        print("Error: No data available in metadata after cleaning.")
-        return
-
-    # Use the entire df_games_meta dataframe
-    df_processed = df_games_meta.copy()
-
-    print("Preprocessing text data for full dataset...")
-    # Handle potential non-list 'tags' entries more robustly
-    df_processed['tags_str'] = df_processed['tags'].apply(
-        lambda x: ' '.join(x) if isinstance(x, list) else (str(x) if pd.notna(x) else '')
-    )
-    df_processed['combined_text'] = df_processed['description'].fillna('') + ' ' + df_processed['tags_str']
-
-    print("Training TF-IDF model on full dataset...")
-    # Consider adjusting max_features if memory becomes an issue
-    tfidf = TfidfVectorizer(stop_words='english', max_features=10000) # Increased max_features
-    tfidf_matrix = tfidf.fit_transform(df_processed['combined_text'])
-
-    print("Saving full model and data...")
-    joblib.dump(tfidf, TFIDF_MODEL_PATH)
-    joblib.dump(tfidf_matrix, TFIDF_MATRIX_PATH)
-    # Save the full df_games and the processed metadata df (only necessary columns)
-    joblib.dump(df_games, GAMES_DF_PATH)
-    joblib.dump(df_processed[['app_id', 'description', 'tags_str']], META_DF_PATH)
-
-    print("Full model training and saving complete.")
 
 
 def load_model_and_data():
@@ -140,18 +68,6 @@ def load_model_and_data():
         print(f"An error occurred loading full model/data: {e}")
         return None, None, None, None
 
-def _clean_html(raw_html):
-    """Helper function to clean HTML content."""
-    if not raw_html or not isinstance(raw_html, str):
-        return ""
-    try:
-        soup = BeautifulSoup(raw_html, 'html.parser')
-        # Get text, replace consecutive whitespace with a single space, strip ends
-        text = ' '.join(soup.get_text(separator=' ', strip=True).split())
-        return text
-    except Exception as e:
-        print(f"Error cleaning HTML: {e}")
-        return "" # Return empty string on error
 
 def get_steam_app_details(app_id):
     """Fetches app details from Steam Storefront API, cleans descriptions, and extracts key text."""
@@ -808,3 +724,101 @@ def get_collaborative_recommendations(app_id=None, favorite_games=None, n=12, df
 
     print(f"Generated {len(result)} collaborative filtering recommendations")
     return result, source_game_title
+
+
+def get_hybrid_recommendations(app_id, n=12, df_games=None, content_weight=0.5, collab_weight=0.5):
+    """
+    Generates hybrid recommendations leveraging off the combination of content-based and item-item collaborative filtering.
+    Uses interleaved approach to combine the two recommendation types.
+    """
+    print(f"Generating hybrid recommendations for app_id {app_id}...")
+
+    # Get content-based recommendations
+    content_recs_df, source_game_title_content = get_content_recommendations(app_id, n=n)
+    if content_recs_df.empty:
+        print(f"✗ No content-based recommendations found for {app_id}.")
+        return pd.DataFrame(), source_game_title_content
+    else:
+        content_recs_df = content_recs_df.copy()  # Ensure we are working with a copy
+        content_recs_df['source'] = 'content'
+        print(f"✓ Found {len(content_recs_df)} content-based recommendations for {app_id}.")
+
+    # Get Item-item collaborative recommendations
+    # Ensure all df_games is available
+    global _df_games_cache
+    if df_games is None:
+        if _df_games_cache is not None:
+            df_games = _df_games_cache
+        else:
+            _, _, df_games_loaded, _ = load_model_and_data()
+            if df_games_loaded is not None:
+                _df_games_cache = df_games_loaded
+                df_games = df_games_loaded
+            else:
+                print("Hybrid: Failed to load df_games for collaborative part.")
+                df_games = pd.DataFrame() # Ensure it's a DataFrame
+
+    collab_recs_df, source_game_title_collab = get_collaborative_recommendations(app_id=app_id, n=n, df_games=df_games)
+    if collab_recs_df.empty:
+        print(f"✗ No collaborative recommendations found for {app_id}.")
+        return pd.DataFrame(), source_game_title_collab
+    else:
+        collab_recs_df = collab_recs_df.copy()  # Ensure we are working with a copy
+        collab_recs_df['source'] = 'collaborative'
+        print(f"✓ Found {len(collab_recs_df)} collaborative recommendations for {app_id}.")
+
+    # Determine primary source title
+    source_game_title = source_game_title_content if source_game_title_content and not source_game_title_content.startswith("Game ID") else source_game_title_collab
+
+    # --- Interleaving Strategy ---
+    hybrid_recs = []
+    content_list = content_recs_df.to_dict('records') if not content_recs_df.empty else []
+    collab_list = collab_recs_df.to_dict('records') if not collab_recs_df.empty else []
+    
+    added_app_ids = set()
+    len_max = max(len(content_list), len(collab_list))
+    
+    for i in range(len_max):
+        # Add content rec if available and not already added
+        if i < len(content_list):
+            rec = content_list[i]
+            app_id_rec = rec.get('app_id')
+            if app_id_rec not in added_app_ids:
+                rec['hybrid_rank'] = len(hybrid_recs) + 1 # Add rank based on interleaving order
+                hybrid_recs.append(rec)
+                added_app_ids.add(app_id_rec)
+                if len(hybrid_recs) == n: break # Stop if we reached desired count
+        
+        if len(hybrid_recs) == n: break # Check again after potentially adding content rec
+        
+        # Add collab rec if available and not already added
+        if i < len(collab_list):
+            rec = collab_list[i]
+            app_id_rec = rec.get('app_id')
+            if app_id_rec not in added_app_ids:
+                rec['hybrid_rank'] = len(hybrid_recs) + 1 # Add rank
+                hybrid_recs.append(rec)
+                added_app_ids.add(app_id_rec)
+                if len(hybrid_recs) == n: break # Stop if we reached desired count
+    
+    if not hybrid_recs:
+        print("Hybrid: No recommendations generated after combining.")
+        return pd.DataFrame(), source_game_title
+        
+    hybrid_df = pd.DataFrame(hybrid_recs)
+    hybrid_df['recommendation_type'] = 'hybrid' # Set final type
+    
+    # Ensure standard columns are present
+    final_cols_ordered = ['app_id', 'title', 'similarity', 'source', 'hybrid_rank', 'date_release', 'rating', 'price_final', 'recommendation_type', 'source_game_id']
+    for col in final_cols_ordered:
+         if col not in hybrid_df.columns:
+             if col == 'similarity': hybrid_df[col] = 0.0 # Default similarity if missing
+             elif col == 'hybrid_rank': hybrid_df[col] = 0 # Default rank
+             else: hybrid_df[col] = None
+    
+    # Select and reorder columns
+    present_cols = [col for col in final_cols_ordered if col in hybrid_df.columns]
+    hybrid_df = hybrid_df[present_cols]
+    
+    print(f"--- Generated {len(hybrid_df)} HYBRID recommendations for {app_id} ('{source_game_title}') ---")
+    return hybrid_df, source_game_title

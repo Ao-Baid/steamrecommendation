@@ -1,3 +1,4 @@
+<!-- filepath: c:\Users\aobai\Documents\Programming Stuff\Steam Game Recommendation Website\steamrecommendation\steamrecommendations\templates\steamrecommendations\recommendations_display.html -->
 {% extends "steamrecommendations/base_generic.html" %}
 
 {% block title %}Game Recommendations for {{ source_game_title|default:"Selected Game" }}{% endblock %}
@@ -26,6 +27,7 @@
                 <strong>View Recommendation Type:</strong>
                 <a href="?type=content" class="btn btn-sm {% if recommendation_type == 'content' %}btn-primary{% else %}btn-outline-primary{% endif %}">Content-Based</a>
                 <a href="?type=collaborative" class="btn btn-sm {% if recommendation_type == 'collaborative' %}btn-primary{% else %}btn-outline-primary{% endif %}">Item-Item Filtering</a>
+                <a href="?type=hybrid" class="btn btn-sm {% if recommendation_type == 'hybrid' %}btn-primary{% else %}btn-outline-primary{% endif %}">Hybrid</a> {# Add Hybrid Button #}
                 <!-- Add link back to search or home -->
                 <a href="{% url 'index' %}" class="btn btn-sm btn-outline-secondary ms-2">Back to Home</a>
             </div>
@@ -40,20 +42,27 @@
             {% for game in recommendations %}
             <div class="col">
                 <div class="card h-100 game-card">
-                    {% if game.header_image %}
-                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.app_id }}/header.jpg" class="card-img-top game-card-img" alt="{{ game.title }}">
-                    {% else %}
-                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.app_id }}/header.jpg" class="card-img-top game-card-img" alt="No image available">
-                    {% endif %}
+                    {# Use a placeholder if header_image logic isn't present, otherwise use header_image #}
+                    <img src="https://cdn.cloudflare.steamstatic.com/steam/apps/{{ game.app_id }}/header.jpg" 
+                         class="card-img-top game-card-img" 
+                         alt="{{ game.title }}"
+                         onerror="this.onerror=null; this.src='https://via.placeholder.com/460x215?text=No+Image'; this.style.objectFit='cover';">
+                    
                     <div class="card-body d-flex flex-column">
                         <h5 class="card-title game-card-title">{{ game.title }} ({{ game.app_id }})</h5>
                         <p class="card-text small mb-1">
+                            {% if game.similarity is not None %}
                             Similarity: {{ game.similarity|floatformat:4 }}
+                            {% endif %}
+                            {% if game.source %} {# Display source if available (from hybrid) #}
+                            <span class="rec-type">({{ game.source|title }})</span>
+                            {% else %}
                             <span class="rec-type">({{ game.recommendation_type|title }})</span>
+                            {% endif %}
                         </p>
                         <p class="card-text small mb-1">Release Date: {{ game.date_release|default:"N/A" }}</p>
                         <p class="card-text small mb-1">Rating: {{ game.rating|default:"N/A" }}</p>
-                        <p class="card-text small mb-1">Price: {{ game.price_final|default:"N/A" }}</p>
+                        <p class="card-text small mb-1">Price: {% if game.price_final is not None %}${{ game.price_final|floatformat:2 }}{% else %}N/A{% endif %}</p> {# Handle None price #}
                         {% if game.source_game_id %}
                             <p class="card-text small fst-italic"><small>Source: {{ game.source_game_id }}</small></p>
                         {% endif %}
@@ -63,6 +72,7 @@
                         <div class="btn-group btn-group-sm" role="group">
                             <a href="{% url 'recommendations_view' game.app_id %}?type=content" class="btn btn-recs" title="Find similar (Content)">Content</a>
                             <a href="{% url 'recommendations_view' game.app_id %}?type=collaborative" class="btn btn-recs" title="Find similar (Item-Item-Collaborative)">Collab</a>
+                            <a href="{% url 'recommendations_view' game.app_id %}?type=hybrid" class="btn btn-recs" title="Find similar (Hybrid)">Hybrid</a> {# Add Hybrid Button #}
                         </div>
                     </div>
                 </div>
