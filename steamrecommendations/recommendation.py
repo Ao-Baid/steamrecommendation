@@ -822,3 +822,149 @@ def get_hybrid_recommendations(app_id, n=12, df_games=None, content_weight=0.5, 
     
     print(f"--- Generated {len(hybrid_df)} HYBRID recommendations for {app_id} ('{source_game_title}') ---")
     return hybrid_df, source_game_title
+
+
+def _parse_price_range(price_range_str, price_value):
+    if price_value is None or pd.isna(price_value):
+        return False # Cannot compare if price is unknown
+    try:
+        price = float(price_value)
+    except ValueError:
+        return False # Cannot convert price to float
+        
+    if price_range_str == 'low': # Under $10
+        return price < 10.0
+    elif price_range_str == 'medium': # $10-30
+        return 10.0 <= price < 30.0
+    elif price_range_str == 'high': # Over $30
+        return price >= 30.0
+    elif price_range_str == 'any' or not price_range_str: # also handle empty string as 'any'
+        return True
+    return True # Default to true if range is unknown or malformed
+
+def get_personalized_recommendations(user_preferences, n=12):
+    _, _, df_games, df_meta = load_model_and_data()
+
+    if df_games is None or df_games.empty:
+        print("Personalized: df_games not loaded or empty.")
+        return pd.DataFrame(), "Error: Game data not available for personalized recommendations."
+    if df_meta is None or df_meta.empty:
+        print("Personalized: df_meta not loaded or empty.")
+        # We can proceed but genre filtering might be limited if df_meta is crucial for tags
+        # For now, let's allow it to proceed and handle missing 'tags_str' later
+
+    # Ensure 'app_id' is int for merging and create copies for modification
+    current_df_games = df_games.copy()
+    current_df_games['app_id'] = current_df_games['app_id'].astype(int)
+    
+    current_df_meta = df_meta.copy() if df_meta is not None else pd.DataFrame(columns=['app_id'])
+    current_df_meta['app_id'] = current_df_meta['app_id'].astype(int)
+
+    meta_cols_to_merge = ['app_id']
+    if 'tags_str' in current_df_meta.columns:
+        meta_cols_to_merge.append('tags_str')
+    else:
+        current_df_meta['tags_str'] = "" # Add dummy if missing
+        if 'tags_str' not in meta_cols_to_merge: meta_cols_to_merge.append('tags_str')
+        
+    df_meta_subset = current_df_meta[meta_cols_to_merge].drop_duplicates(subset=['app_id'])
+
+    candidate_games_df = pd.merge(current_df_games, df_meta_subset, on='app_id', how='left')
+    if 'tags_str' not in candidate_games_df.columns: # Ensure column exists after merge
+         candidate_games_df['tags_str'] = ""
+    candidate_games_df['tags_str'] = candidate_games_df['tags_str'].fillna('')
+
+    favorite_games_ids = user_preferences.get('favorite_games', [])
+    # Ensure favorite_games_ids are integers
+    favorite_games_ids = [int(gid) for gid in favorite_games_ids if str(gid).isdigit()]
+
+    if favorite_games_ids:
+        print(f"Personalized: Using favorite games: {favorite_games_ids}")
+        collab_recs_df, _ = get_collaborative_recommendations(
+            favorite_games=favorite_games_ids, n=n * 3, df_games=current_df_games # Pass current_df_games
+        )
+
+        if not collab_recs_df.empty:
+            # Merge with df_meta_subset to get tags for filtering
+            collab_recs_df['app_id'] = collab_recs_df['app_id'].astype(int) # Ensure type for merge
+            filtered_collab_recs = pd.merge(collab_recs_df, df_meta_subset, on='app_id', how='left')
+            if 'tags_str' not in filtered_collab_recs.columns: filtered_collab_recs['tags_str'] = ""
+            filtered_collab_recs['tags_str'] = filtered_collab_recs['tags_str'].fillna('')
+
+            fav_genres = user_preferences.get('favorite_genres', [])
+            if fav_genres and 'tags_str' in filtered_collab_recs.columns:
+                fav_genres_lower = [str(genre).lower() for genre in fav_genres]
+                genre_pattern = '|'.join(fav_genres_lower)
+                if genre_pattern:
+                    filtered_collab_recs = filtered_collab_recs[
+                        filtered_collab_recs['tags_str'].str.lower().str.contains(genre_pattern, na=False)
+                    ]
+            
+            price_range = user_preferences.get('preferred_price_range')
+            if price_range and 'price_final' in filtered_collab_recs.columns:
+                # Ensure price_final is numeric for comparison
+                filtered_collab_recs['price_final_numeric'] = pd.to_numeric(filtered_collab_recs['price_final'], errors='coerce')
+                filtered_collab_recs = filtered_collab_recs[
+                    filtered_collab_recs.apply(lambda x: _parse_price_range(price_range, x['price_final_numeric']), axis=1)
+                ]
+                if 'price_final_numeric' in filtered_collab_recs.columns: # Drop if it exists
+                    filtered_collab_recs = filtered_collab_recs.drop(columns=['price_final_numeric'])
+
+
+            if not filtered_collab_recs.empty:
+                print(f"Personalized: Found {len(filtered_collab_recs)} recommendations after filtering collaborative results.")
+                filtered_collab_recs['recommendation_type'] = 'personalized_collab_filtered'
+                return filtered_collab_recs.head(n), "Recommendations based on your favorite games and preferences"
+
+    print("Personalized: Falling back to filtering all games by preferences.")
+    # Ensure candidate_games_df has numeric price_final for filtering
+    if 'price_final' in candidate_games_df.columns:
+        candidate_games_df['price_final_numeric'] = pd.to_numeric(candidate_games_df['price_final'], errors='coerce')
+    else: # Add dummy numeric price if 'price_final' doesn't exist, to prevent error in apply
+        candidate_games_df['price_final_numeric'] = np.nan
+
+
+    fav_genres = user_preferences.get('favorite_genres', [])
+    if fav_genres and 'tags_str' in candidate_games_df.columns:
+        fav_genres_lower = [str(genre).lower() for genre in fav_genres]
+        genre_pattern = '|'.join(fav_genres_lower)
+        if genre_pattern:
+            candidate_games_df = candidate_games_df[
+                candidate_games_df['tags_str'].str.lower().str.contains(genre_pattern, na=False)
+            ]
+
+    price_range = user_preferences.get('preferred_price_range')
+    if price_range: # price_final_numeric was already created
+        candidate_games_df = candidate_games_df[
+            candidate_games_df.apply(lambda x: _parse_price_range(price_range, x['price_final_numeric']), axis=1)
+        ]
+    
+    if 'price_final_numeric' in candidate_games_df.columns: # Drop the temporary column
+        candidate_games_df = candidate_games_df.drop(columns=['price_final_numeric'])
+
+
+    if candidate_games_df.empty:
+        print("Personalized: No games found after applying all preference filters.")
+        return pd.DataFrame(), "No games match your current preferences."
+
+    sort_columns = []
+    if 'user_reviews' in candidate_games_df.columns:
+        candidate_games_df['user_reviews_numeric'] = pd.to_numeric(candidate_games_df['user_reviews'], errors='coerce').fillna(0)
+        sort_columns.append('user_reviews_numeric')
+    if 'rating' in candidate_games_df.columns:
+        candidate_games_df['rating_numeric'] = pd.to_numeric(candidate_games_df['rating'], errors='coerce').fillna(0)
+        sort_columns.append('rating_numeric')
+
+    if sort_columns:
+         # Sort by multiple criteria: user_reviews desc, then rating desc
+        ascending_order = [False] * len(sort_columns) # All descending
+        candidate_games_df = candidate_games_df.sort_values(by=sort_columns, ascending=ascending_order)
+    
+    # Clean up temporary numeric sort columns
+    if 'user_reviews_numeric' in candidate_games_df.columns:
+        candidate_games_df = candidate_games_df.drop(columns=['user_reviews_numeric'])
+    if 'rating_numeric' in candidate_games_df.columns:
+        candidate_games_df = candidate_games_df.drop(columns=['rating_numeric'])
+
+    candidate_games_df['recommendation_type'] = 'personalized_preference_filtered'
+    return candidate_games_df.head(n), "Recommendations based on your preferences"

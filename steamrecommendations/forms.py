@@ -1,68 +1,95 @@
 from django import forms
-from .models import SurveyUserProfile
 from crispy_forms.helper import FormHelper
-from crispy_forms.layout import Layout, Submit, Row, Column, Fieldset, Div
+from crispy_forms.layout import Layout, Submit, Row, Column, HTML
 
+# Define choices for the form fields
+# You can expand this list or make it dynamic if needed
+COMMON_GENRES = [
+    ('Action', 'Action'),
+    ('Adventure', 'Adventure'),
+    ('Strategy', 'Strategy'),
+    ('RPG', 'RPG'),
+    ('Indie', 'Indie'),
+    ('Simulation', 'Simulation'),
+    ('Casual', 'Casual'),
+    ('Free to Play', 'Free to Play'),
+    ('Sports', 'Sports'),
+    ('Racing', 'Racing'),
+    ('MMO', 'MMO'), # Massively Multiplayer
+    # Add more genres as you see fit
+]
 
-class UserSurveyForm(forms.ModelForm):
-    PRICE_CHOICES = [
-        ('low', 'Under $10'),
-        ('medium', '$10-30'),
-        ('high', 'Over $30'),
-        ('any', 'Any price range')
-    ]
-    
+PRICE_RANGES = [
+    ('any', 'Any Price'),
+    ('low', 'Low (e.g., under $10)'),
+    ('medium', 'Medium (e.g., $10 - $30)'),
+    ('high', 'High (e.g., over $30)'),
+]
+
+class UserSurveyForm(forms.Form):
     favorite_genres = forms.MultipleChoiceField(
-        choices=[],
-        label="Favorite Genres",
-        widget=forms.SelectMultiple(attrs={'class': 'form-select', 'size': '5'}),
-        help_text="Hold Ctrl/Cmd to select multiple genres"
+        choices=COMMON_GENRES,
+        widget=forms.CheckboxSelectMultiple,
+        required=False,
+        label="Select your favorite game genres:"
     )
-
     preferred_price_range = forms.ChoiceField(
-        choices=PRICE_CHOICES,
-        label="Preferred Price Range",
-        widget=forms.Select(attrs={'class': 'form-select'})
+        choices=PRICE_RANGES,
+        widget=forms.RadioSelect, # Or forms.Select for a dropdown
+        required=False,
+        initial='any',
+        label="What's your preferred price range?"
     )
-
-    class Meta:
-        model = SurveyUserProfile
-        fields = ['favourite_genres', 'preferred_price_range']
+    # You could add other preferences here, e.g.:
+    # play_time_preference = forms.ChoiceField(
+    #     choices=[('any', 'Any'), ('short', 'Short (1-10 hours)'), ('medium', 'Medium (10-50 hours)'), ('long', 'Long (50+ hours)')],
+    #     widget=forms.RadioSelect,
+    #     required=False,
+    #     initial='any',
+    #     label="Preferred game length/play time:"
+    # )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Dynamically set the choices for favorite genres based on your Genre model
-        from collections import Counter
-        import pandas as pd
-
-        df_games_meta = pd.read_json('./data/games_metadata.json', lines=True, orient="records")
-        genres = df_games_meta['tags'].explode().dropna().unique()
-        genre_counts = Counter(genres)
-        top_genres = [genre for genre, count in genre_counts.most_common(20)]
-
-        self.fields['favorite_genres'].choices = [(genre, genre) for genre in top_genres]
-        
-        # Add crispy forms helper
         self.helper = FormHelper()
         self.helper.form_method = 'post'
-        self.helper.form_class = 'form-horizontal'
-        self.helper.label_class = 'col-md-3'
-        self.helper.field_class = 'col-md-9'
-        
+        self.helper.form_action = 'user_survey' # Or the appropriate URL name
         self.helper.layout = Layout(
-            Fieldset(
-                'Gaming Preferences',
-                Div(
-                    'favorite_genres', 
-                    css_class='mb-4'
-                ),
-                Div(
-                    'preferred_price_range',
-                    css_class='mb-4'
-                ),
+            HTML("""
+                <p class="mb-3">Help us understand your gaming tastes to provide better recommendations.</p>
+            """),
+            Row(
+                Column('favorite_genres', css_class='form-group col-md-12 mb-3'),
+                css_class='mb-3'
             ),
-            Div(
-                Submit('submit', 'Submit', css_class='btn btn-primary'),
-                css_class='text-center mt-4'
+            Row(
+                Column('preferred_price_range', css_class='form-group col-md-12 mb-3'),
+                css_class='mb-3'
+            ),
+            # Add other fields to the layout if you include them
+            # Row(
+            #     Column('play_time_preference', css_class='form-group col-md-12 mb-3'),
+            #     css_class='mb-3'
+            # ),
+            Submit('submit', 'Save Preferences', css_class='btn btn-success mt-3')
+        )
+
+class GameSearchForm(forms.Form):
+    query = forms.CharField(
+        label='Search for a game by title', 
+        max_length=100,
+        widget=forms.TextInput(attrs={'placeholder': 'E.g., Cyberpunk 2077'})
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.helper = FormHelper()
+        self.helper.form_method = 'get' # Typically search is GET
+        self.helper.form_action = 'search_games' # URL name for search results
+        self.helper.layout = Layout(
+            Row(
+                Column('query', css_class='form-group col-md-9 mb-0'),
+                Column(Submit('submit', 'Search', css_class='btn btn-primary w-100'), css_class='form-group col-md-3 mb-0 align-self-end d-flex'),
+                css_class='align-items-end' # Align items to the bottom for better visual
             )
         )

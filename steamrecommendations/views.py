@@ -1,11 +1,11 @@
 from django.shortcuts import render, redirect
 from .forms import UserSurveyForm
 from .models import SurveyUserProfile
-from django.http import HttpResponse, Http404
+from django.http import HttpResponse, Http404, JsonResponse
 from django.core.cache import cache
 from django.urls import reverse
 from django.contrib import messages
-from .recommendation import get_content_recommendations, load_model_and_data, get_collaborative_recommendations, get_hybrid_recommendations
+from .recommendation import get_content_recommendations, load_model_and_data, get_collaborative_recommendations, get_hybrid_recommendations, get_personalized_recommendations
 import pandas as pd
 import random
 import requests
@@ -17,17 +17,31 @@ DF_GAMES_CACHE = None
 def preload_df_games():
     global DF_GAMES_CACHE
     if DF_GAMES_CACHE is None:
-        try:
-            _, _, games_df, _ = load_model_and_data()
-            if games_df is not None:
-                DF_GAMES_CACHE = games_df
-                print("Preloaded df_games into view cache.")
+        print("Preloading df_games for views...")
+        _, _, games_df, _ = load_model_and_data() # Assuming load_model_and_data returns df_games
+        if games_df is not None:
+            DF_GAMES_CACHE = games_df.copy() # Store a copy
+            # Ensure 'app_id' and 'title' exist for search
+            if 'app_id' not in DF_GAMES_CACHE.columns or 'title' not in DF_GAMES_CACHE.columns:
+                 print("Warning: DF_GAMES_CACHE is missing 'app_id' or 'title' columns.")
+                 DF_GAMES_CACHE = None # Invalidate if essential columns are missing
             else:
-                print("Failed to preload df_games.")
-        except Exception as e:
-            print(f"Error preloading df_games: {e}")
+                 print(f"df_games preloaded with {len(DF_GAMES_CACHE)} games.")
+        else:
+            print("Failed to preload df_games.")
 
 preload_df_games() # Load when the server starts
+
+def ajax_search_games(request):
+    query = request.GET.get('q', '')
+    results = []
+    # Ensure DF_GAMES_CACHE is loaded and has necessary columns
+    if query and DF_GAMES_CACHE is not None and 'app_id' in DF_GAMES_CACHE.columns and 'title' in DF_GAMES_CACHE.columns:
+        # Case-insensitive search
+        search_results_df = DF_GAMES_CACHE[DF_GAMES_CACHE['title'].str.contains(query, case=False, na=False)]
+        # Select relevant columns and limit results
+        results = search_results_df[['app_id', 'title']].head(10).to_dict(orient='records')
+    return JsonResponse({'games': results})
 
 # Create your views here.
 def index(request):
@@ -134,16 +148,79 @@ def user_survey(request):
     if request.method == 'POST':
         form = UserSurveyForm(request.POST)
         if form.is_valid():
-            # Process the form data without associating it with a user
-            favorite_genres = form.cleaned_data['favorite_genres']
-            preferred_price_range = form.cleaned_data['preferred_price_range']
-            play_time_preference = form.cleaned_data['play_time_preference']
-            # You can handle the data here, e.g., save it to a temporary storage or use it directly
-            return redirect('personalized_recommendations')
+            favorite_game_ids_str = request.POST.get('favorite_game_ids', '') # Expecting comma-separated IDs
+            favorite_game_ids = []
+            if favorite_game_ids_str:
+                try:
+                    # Filter out empty strings that might result from split and ensure they are digits
+                    favorite_game_ids = [int(gid.strip()) for gid in favorite_game_ids_str.split(',') if gid.strip().isdigit()]
+                except ValueError:
+                    messages.error(request, "There was an issue with the format of favorite game IDs.")
+                    # Potentially re-render form with an error or handle as appropriate
+
+            request.session['user_preferences'] = {
+                'favorite_genres': form.cleaned_data.get('favorite_genres', []),
+                'preferred_price_range': form.cleaned_data.get('preferred_price_range', 'any'),
+                'favorite_games': favorite_game_ids # Store list of IDs
+            }
+            messages.success(request, "Your preferences have been saved!")
+            return redirect('personalized_recommendations_view')
+        else:
+            messages.error(request, "Please correct the errors in the form below.")
     else:
-        form = UserSurveyForm()
+        initial_prefs = request.session.get('user_preferences', {})
+        form = UserSurveyForm(initial=initial_prefs)
+
+    existing_favorite_game_ids = initial_prefs.get('favorite_games', [])
+    existing_favorite_games_details = []
+    if existing_favorite_game_ids and DF_GAMES_CACHE is not None and 'app_id' in DF_GAMES_CACHE.columns and 'title' in DF_GAMES_CACHE.columns:
+        try:
+            # Ensure IDs are integers for isin
+            valid_ids = [int(gid) for gid in existing_favorite_game_ids if str(gid).isdigit()]
+            if valid_ids:
+                fav_games_df = DF_GAMES_CACHE[DF_GAMES_CACHE['app_id'].isin(valid_ids)]
+                existing_favorite_games_details = fav_games_df[['app_id', 'title']].to_dict('records')
+        except Exception as e:
+            print(f"Error fetching details for existing favorite games: {e}")
+
+
+    return render(request, 'steamrecommendations/user_survey.html', {
+        'form': form,
+        'existing_favorite_games': existing_favorite_games_details
+    })
+
+def personalized_recommendations_view(request):
+    user_preferences = request.session.get('user_preferences')
+    if not user_preferences:
+        messages.warning(request, "Please complete the survey to get personalized recommendations.")
+        return redirect('user_survey')
+
+    # Ensure favorite_games is part of user_preferences if not already
+    if 'favorite_games' not in user_preferences:
+        user_preferences['favorite_games'] = [] # Default to empty list
+
+    recommendations_df, source_game_title = get_personalized_recommendations(user_preferences, n=12)
     
-    return render(request, 'steamrecommendations/user_survey.html', {'form': form})
+    recommendations_list = []
+    error_message = None
+
+    if recommendations_df.empty:
+        error_message = source_game_title 
+    else:
+        recommendations_df = recommendations_df.replace({pd.NA: None, np.nan: None})
+        if 'date_release' in recommendations_df.columns:
+            recommendations_df['date_release'] = recommendations_df['date_release'].astype(str).replace({'NaT': None, 'nan': None})
+        recommendations_list = recommendations_df.to_dict('records')
+
+    context = {
+        'source_game_title': "Personalized For You", # Or use the title from the function if more specific
+        'app_id': None, 
+        'recommendations': recommendations_list,
+        'recommendation_type': 'personalized', # Used for display logic in template
+        'error_message': error_message if recommendations_df.empty else None,
+        'user_preferences': user_preferences 
+    }
+    return render(request, 'steamrecommendations/recommendations_display.html', context)
 
 
 def collaborative_recommendations_for_game(request, app_id):
